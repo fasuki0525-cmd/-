@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>オレオリ</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101827;color:white;font-family:sans-serif;text-align:center;padding:16px}
+main{max-width:520px;margin:auto}
+section{background:#202e43;padding:18px;border-radius:16px;margin:14px 0}
+button,input,select{padding:12px;border:0;border-radius:9px;margin:5px;font-size:16px}
+button{background:#32865d;color:white;font-weight:bold}
+input,select{max-width:100%}
+.hidden{display:none}
+.cards{display:flex;justify-content:center;flex-wrap:wrap;gap:4px}
+.card{background:#354963;width:30%;min-height:65px;font-size:18px}
+.selected{outline:3px solid #65e6a0}
+.hand{font-size:22px;letter-spacing:2px}
+#battle{display:grid;gap:12px}
+#versus{font-size:24px;white-space:pre-line;padding:15px}
+.small{color:#b9c8da;font-size:14px}
+</style>
+</head>
+<body>
+<main>
+<h1>オレオリ</h1>
+<p>友達とじゃんけん対戦</p>
+
+<section id="home">
+<h2>対戦モード</h2>
+<select id="mode" onchange="modeChanged()">
+<option value="normal">ノーマル</option>
+<option value="hidden">ガチ対決・非公開</option>
+<option value="open">ガチ対決・公開</option>
+<option value="custom">カスタム</option>
+</select>
+
+<div id="custom" class="hidden">
+<h3>カードの枚数を決める</h3>
+<p>グー <input id="rockCount" type="number" min="0" max="9" value="3"></p>
+<p>チョキ <input id="scissorsCount" type="number" min="0" max="9" value="3"></p>
+<p>パー <input id="paperCount" type="number" min="0" max="9" value="3"></p>
+<p id="countText">合計：9 / 9枚</p>
+</div>
+
+<p><button onclick="createRoom()">ルームを作る</button></p>
+<hr>
+<input id="joinCode" placeholder="ルームコード">
+<button onclick="alert('オンライン参加機能は次の段階で接続します。')">参加する</button>
+</section>
+
+<section id="game" class="hidden">
+<h2 id="roomCode"></h2>
+<p id="round"></p>
+<div id="battle">
+<div>
+<strong>相手：プレイヤー2</strong>
+<p>勝利数：<span id="enemyWins">0</span>勝</p>
+<p class="small">残り：<span id="enemyLeft">9</span>枚</p>
+<div id="enemyHand" class="hand"></div>
+</div>
+
+<div id="versus">A：？
+B：？</div>
+
+<div>
+<strong>自分：プレイヤー1</strong>
+<p>勝利数：<span id="myWins">0</span>勝</p>
+<p class="small">残り：<span id="myLeft">9</span>枚</p>
+<div id="myHand" class="hand"></div>
+</div>
+</div>
+
+<div id="discardArea" class="hidden">
+<h3>捨てるカードを1枚選択</h3>
+<div id="discardCards" class="cards"></div>
+<button onclick="discardCard()">捨てる</button>
+</div>
+
+<div id="playArea">
+<h3>出すカードを選択</h3>
+<div id="playCards" class="cards"></div>
+<button onclick="playCard()">選択完了</button>
+</div>
+<p id="message"></p>
+</section>
+</main>
+
+<script>
+const names={rock:"✊ グー",scissors:"✌ チョキ",paper:"✋ パー"};
+let hand=[],enemy=[],selected=-1,round=1,myWins=0,enemyWins=0;
+let mode="normal",total=9,discarding=false;
+
+function el(id){return document.getElementById(id)}
+function modeChanged(){
+ el("custom").classList.toggle("hidden",el("mode").value!=="custom");
+ updateCount();
+}
+function updateCount(){
+ let n=Number(el("rockCount").value)+Number(el("scissorsCount").value)+Number(el("paperCount").value);
+ el("countText").textContent="合計："+n+" / 9枚";
+}
+["rockCount","scissorsCount","paperCount"].forEach(id=>el(id).addEventListener("input",updateCount));
+
+function createRoom(){
+ mode=el("mode").value;
+ let deck;
+ if(mode==="custom"){
+  let r=Number(el("rockCount").value),s=Number(el("scissorsCount").value),p=Number(el("paperCount").value);
+  if([r,s,p].some(n=>!Number.isInteger(n)||n<0)||r+s+p!==9){
+   alert("合計が9枚になるようにしてください");return;
+  }
+  deck=[...Array(r).fill("rock"),...Array(s).fill("scissors"),...Array(p).fill("paper")];
+ }else{
+  deck=["rock","rock","rock","scissors","scissors","scissors","paper","paper","paper"];
+ }
+ hand=[...deck];
+ enemy=[...deck];
+ if(mode==="normal")total=9;
+ else total=8;
+ round=1;myWins=0;enemyWins=0;selected=-1;
+ if(mode!=="normal")discarding=true;
+ else discarding=false;
+ el("roomCode").textContent="ルームコード："+Math.random().toString(36).slice(2,8).toUpperCase();
+ el("home").classList.add("hidden");
+ el("game").classList.remove("hidden");
+ render();
+}
+
+function render(){
+ el("round").textContent="第"+round+"回戦 / 全"+total+"回戦";
+ el("myWins").textContent=myWins;
+ el("enemyWins").textContent=enemyWins;
+ el("myLeft").textContent=hand.length;
+ el("enemyLeft").textContent=enemy.length;
+ el("myHand").textContent=hand.map(c=>names[c].split(" ")[0]).join(" ");
+ el("enemyHand").textContent=mode==="open"?enemy.map(c=>names[c].split(" ")[0]).join(" "):"非公開";
+ el("discardArea").classList.toggle("hidden",!discarding);
+ el("playArea").classList.toggle("hidden",discarding);
+ if(discarding)draw("discardCards");
+ else draw("playCards");
+}
+
+function draw(id){
+ let area=el(id);area.innerHTML="";
+ hand.forEach((c,i)=>{
+  let b=document.createElement("button");
+  b.className="card"+(selected===i?" selected":"");
+  b.textContent=names[c];
+  b.onclick=()=>{selected=i;render()};
+  area.appendChild(b);
+ });
+}
+
+function discardCard(){
+ if(selected<0){alert("カードを選んでください");return}
+ hand.splice(selected,1);
+ selected=-1;discarding=false;render();
+}
+
+function playCard(){
+ if(selected<0){alert("カードを選んでください");return}
+ let mine=hand.splice(selected,1)[0];
+ let theirs=enemy.splice(Math.floor(Math.random()*enemy.length),1)[0];
+ selected=-1;
+ el("versus").textContent="A："+names[theirs]+"\nB："+names[mine];
+ let result="引き分け";
+ if(mine!==theirs){
+  if((mine==="rock"&&theirs==="scissors")||
+     (mine==="scissors"&&theirs==="paper")||
+     (mine==="paper"&&theirs==="rock")){
+   result="自分の勝ち";myWins++;
+  }else{result="相手の勝ち";enemyWins++}
+ }
+ el("message").textContent=result;
+ round++;
+ if(round>total){
+  el("message").textContent+="！ 対戦終了";
+  el("playArea").classList.add("hidden");
+ }else render();
+}
+</script>
+</body>
+</html>
