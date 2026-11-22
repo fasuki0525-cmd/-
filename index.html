@@ -1,25 +1,29 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>オレオリ</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 *{box-sizing:border-box}
-body{margin:0;background:#101827;color:white;font-family:sans-serif;text-align:center;padding:16px}
-main{max-width:520px;margin:auto}
+body{margin:0;background:#101827;color:white;font-family:sans-serif;text-align:center;padding:14px}
+main{max-width:560px;margin:auto}
 section{background:#202e43;padding:18px;border-radius:16px;margin:14px 0}
 button,input,select{padding:12px;border:0;border-radius:9px;margin:5px;font-size:16px}
-button{background:#32865d;color:white;font-weight:bold}
+button{background:#32865d;color:white;font-weight:bold;cursor:pointer}
+button:disabled{opacity:.45}
 input,select{max-width:100%}
-.hidden{display:none}
-.cards{display:flex;justify-content:center;flex-wrap:wrap;gap:4px}
-.card{background:#354963;width:30%;min-height:65px;font-size:18px}
+.hidden{display:none!important}
+.cards{display:flex;justify-content:center;flex-wrap:wrap;gap:5px}
+.card{background:#354963;width:31%;min-height:65px}
 .selected{outline:3px solid #65e6a0}
-.hand{font-size:22px;letter-spacing:2px}
-#battle{display:grid;gap:12px}
-#versus{font-size:24px;white-space:pre-line;padding:15px}
+.hand{font-size:22px;letter-spacing:3px;min-height:30px;overflow-wrap:anywhere}
 .small{color:#b9c8da;font-size:14px}
+#versus{font-size:24px;white-space:pre-line;padding:16px;background:#152235;border-radius:12px}
+#message{font-weight:bold;min-height:28px}
+hr{border:0;border-top:1px solid #526176;margin:20px 0}
 </style>
 </head>
 <body>
@@ -29,14 +33,15 @@ input,select{max-width:100%}
 
 <section id="home">
 <h2>対戦モード</h2>
-<select id="mode" onchange="modeChanged()">
+<input id="playerName" maxlength="12" placeholder="自分の名前">
+<select id="mode">
 <option value="normal">ノーマル</option>
 <option value="hidden">ガチ対決・非公開</option>
 <option value="open">ガチ対決・公開</option>
 <option value="custom">カスタム</option>
 </select>
 
-<div id="custom" class="hidden">
+<div id="customArea" class="hidden">
 <h3>カードの枚数を決める</h3>
 <p>グー <input id="rockCount" type="number" min="0" max="9" value="3"></p>
 <p>チョキ <input id="scissorsCount" type="number" min="0" max="9" value="3"></p>
@@ -46,139 +51,306 @@ input,select{max-width:100%}
 
 <p><button onclick="createRoom()">ルームを作る</button></p>
 <hr>
-<input id="joinCode" placeholder="ルームコード">
-<button onclick="alert('オンライン参加機能は次の段階で接続します。')">参加する</button>
+<h3>友達のルームに参加</h3>
+<input id="joinCode" maxlength="8" placeholder="ルームコード">
+<button onclick="joinRoom()">参加する</button>
+<p id="homeMessage" class="small"></p>
 </section>
 
 <section id="game" class="hidden">
 <h2 id="roomCode"></h2>
 <p id="round"></p>
-<div id="battle">
+
 <div>
-<strong>相手：プレイヤー2</strong>
+<strong id="opponentName">相手</strong>
 <p>勝利数：<span id="enemyWins">0</span>勝</p>
-<p class="small">残り：<span id="enemyLeft">9</span>枚</p>
-<div id="enemyHand" class="hand"></div>
+<p class="small">残り：<span id="enemyLeft">0</span>枚</p>
+<div id="enemyHand" class="hand">非公開</div>
+<p id="opponentDiscard" class="small"></p>
 </div>
 
-<div id="versus">A：？
-B：？</div>
+<div id="versus">相手の選択を待っています</div>
 
 <div>
-<strong>自分：プレイヤー1</strong>
+<strong id="myName">自分</strong>
 <p>勝利数：<span id="myWins">0</span>勝</p>
 <p class="small">残り：<span id="myLeft">9</span>枚</p>
 <div id="myHand" class="hand"></div>
-</div>
+<p id="myDiscard" class="small"></p>
 </div>
 
 <div id="discardArea" class="hidden">
+<hr>
 <h3>捨てるカードを1枚選択</h3>
 <div id="discardCards" class="cards"></div>
-<button onclick="discardCard()">捨てる</button>
+<button onclick="discardCard()">このカードを捨てる</button>
 </div>
 
-<div id="playArea">
+<div id="playArea" class="hidden">
+<hr>
 <h3>出すカードを選択</h3>
 <div id="playCards" class="cards"></div>
-<button onclick="playCard()">選択完了</button>
+<button id="playButton" onclick="playCard()">選択完了</button>
 </div>
+
 <p id="message"></p>
+<p class="small" id="connection"></p>
 </section>
 </main>
 
 <script>
-const names={rock:"✊ グー",scissors:"✌ チョキ",paper:"✋ パー"};
-let hand=[],enemy=[],selected=-1,round=1,myWins=0,enemyWins=0;
-let mode="normal",total=9,discarding=false;
+const SUPABASE_URL="https://zsoebwqiglefbiddjynz.supabase.co";
+const SUPABASE_KEY="sb_publishable_Hen6ttVRtEQquLzSTd6scg_laiRjk_b";
+const db=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 
-function el(id){return document.getElementById(id)}
-function modeChanged(){
- el("custom").classList.toggle("hidden",el("mode").value!=="custom");
+const names={rock:"✊ グー",scissors:"✌ チョキ",paper:"✋ パー"};
+let code="",token="",player=0,mode="normal";
+let selected=null,room=null,lastHistory=0,polling=null;
+
+const el=id=>document.getElementById(id);
+
+el("mode").addEventListener("change",()=>{
+ el("customArea").classList.toggle("hidden",el("mode").value!=="custom");
  updateCount();
-}
+});
+["rockCount","scissorsCount","paperCount"].forEach(id=>{
+ el(id).addEventListener("input",updateCount);
+});
+
 function updateCount(){
- let n=Number(el("rockCount").value)+Number(el("scissorsCount").value)+Number(el("paperCount").value);
+ const n=Number(el("rockCount").value)+Number(el("scissorsCount").value)+Number(el("paperCount").value);
  el("countText").textContent="合計："+n+" / 9枚";
 }
-["rockCount","scissorsCount","paperCount"].forEach(id=>el(id).addEventListener("input",updateCount));
 
-function createRoom(){
- mode=el("mode").value;
- let deck;
+function makeHand(){
  if(mode==="custom"){
-  let r=Number(el("rockCount").value),s=Number(el("scissorsCount").value),p=Number(el("paperCount").value);
+  const r=Number(el("rockCount").value);
+  const s=Number(el("scissorsCount").value);
+  const p=Number(el("paperCount").value);
   if([r,s,p].some(n=>!Number.isInteger(n)||n<0)||r+s+p!==9){
-   alert("合計が9枚になるようにしてください");return;
+   throw new Error("カードの合計を9枚にしてください");
   }
-  deck=[...Array(r).fill("rock"),...Array(s).fill("scissors"),...Array(p).fill("paper")];
- }else{
-  deck=["rock","rock","rock","scissors","scissors","scissors","paper","paper","paper"];
+  return {rock:r,scissors:s,paper:p};
  }
- hand=[...deck];
- enemy=[...deck];
- if(mode==="normal")total=9;
- else total=8;
- round=1;myWins=0;enemyWins=0;selected=-1;
- if(mode!=="normal")discarding=true;
- else discarding=false;
- el("roomCode").textContent="ルームコード："+Math.random().toString(36).slice(2,8).toUpperCase();
+ return {rock:3,scissors:3,paper:3};
+}
+
+function makeToken(){
+ return crypto.randomUUID()+crypto.randomUUID();
+}
+
+function makeCode(){
+ return Math.random().toString(36).slice(2,8).toUpperCase();
+}
+
+function saveSession(){
+ localStorage.setItem("oreori_code",code);
+ localStorage.setItem("oreori_token",token);
+ localStorage.setItem("oreori_player",String(player));
+}
+
+function showGame(){
  el("home").classList.add("hidden");
  el("game").classList.remove("hidden");
- render();
+ el("roomCode").textContent="ルームコード："+code;
+ el("connection").textContent="オンライン接続中";
 }
 
-function render(){
- el("round").textContent="第"+round+"回戦 / 全"+total+"回戦";
- el("myWins").textContent=myWins;
- el("enemyWins").textContent=enemyWins;
- el("myLeft").textContent=hand.length;
- el("enemyLeft").textContent=enemy.length;
- el("myHand").textContent=hand.map(c=>names[c].split(" ")[0]).join(" ");
- el("enemyHand").textContent=mode==="open"?enemy.map(c=>names[c].split(" ")[0]).join(" "):"非公開";
- el("discardArea").classList.toggle("hidden",!discarding);
- el("playArea").classList.toggle("hidden",discarding);
- if(discarding)draw("discardCards");
- else draw("playCards");
+async function createRoom(){
+ try{
+  mode=el("mode").value;
+  const hand=makeHand();
+  const name=el("playerName").value.trim()||"プレイヤー1";
+  token=makeToken();
+  code=makeCode();
+
+  const {data,error}=await db.rpc("create_oreori_room",{
+   p_code:code,p_token:token,p_name:name,p_mode:mode,p_hand:hand
+  });
+  if(error)throw error;
+  if(data.error)throw new Error(data.error);
+
+  player=1;
+  saveSession();
+  showGame();
+  await refreshRoom();
+  startPolling();
+ }catch(e){
+  el("homeMessage").textContent=e.message;
+ }
 }
 
-function draw(id){
- let area=el(id);area.innerHTML="";
- hand.forEach((c,i)=>{
-  let b=document.createElement("button");
-  b.className="card"+(selected===i?" selected":"");
-  b.textContent=names[c];
-  b.onclick=()=>{selected=i;render()};
+async function joinRoom(){
+ try{
+  mode=el("mode").value;
+  const hand=makeHand();
+  const name=el("playerName").value.trim()||"プレイヤー2";
+  code=el("joinCode").value.trim().toUpperCase();
+  if(!code)throw new Error("ルームコードを入力してください");
+
+  token=makeToken();
+  const {data,error}=await db.rpc("join_oreori_room",{
+   p_code:code,p_token:token,p_name:name,p_hand:hand
+  });
+  if(error)throw error;
+  if(data.error)throw new Error(data.error);
+
+  player=data.player;
+  saveSession();
+  showGame();
+  await refreshRoom();
+  startPolling();
+ }catch(e){
+  el("homeMessage").textContent=e.message;
+ }
+}
+
+function startPolling(){
+ if(polling)clearInterval(polling);
+ polling=setInterval(refreshRoom,1000);
+}
+
+function countHand(h){
+ if(!h)return 0;
+ return Number(h.rock||0)+Number(h.scissors||0)+Number(h.paper||0);
+}
+
+function handText(h){
+ if(!h)return "非公開";
+ return "✊".repeat(Number(h.rock||0))+
+        " ✌".repeat(Number(h.scissors||0))+
+        " ✋".repeat(Number(h.paper||0));
+}
+
+function cardArray(h){
+ const a=[];
+ for(let i=0;i<Number(h.rock||0);i++)a.push("rock");
+ for(let i=0;i<Number(h.scissors||0);i++)a.push("scissors");
+ for(let i=0;i<Number(h.paper||0);i++)a.push("paper");
+ return a;
+}
+
+function drawCards(id,h){
+ const area=el(id);
+ area.innerHTML="";
+ cardArray(h).forEach(card=>{
+  const b=document.createElement("button");
+  b.className="card"+(selected===card?" selected":"");
+  b.textContent=names[card];
+  b.onclick=()=>{
+   selected=card;
+   drawCards(id,h);
+  };
   area.appendChild(b);
  });
 }
 
-function discardCard(){
- if(selected<0){alert("カードを選んでください");return}
- hand.splice(selected,1);
- selected=-1;discarding=false;render();
+function displayHistory(history){
+ if(!Array.isArray(history)||history.length<=lastHistory)return;
+ const latest=history[history.length-1];
+ const p1=latest.player1_card;
+ const p2=latest.player2_card;
+ const result=latest.result;
+ const resultText=result==="draw"?"引き分け":
+  result==="player1"?(player===1?"自分の勝ち":"相手の勝ち"):
+  (player===2?"自分の勝ち":"相手の勝ち");
+ el("versus").textContent=
+  "プレイヤー1："+names[p1]+"\nプレイヤー2："+names[p2];
+ el("message").textContent=resultText;
+ lastHistory=history.length;
 }
 
-function playCard(){
- if(selected<0){alert("カードを選んでください");return}
- let mine=hand.splice(selected,1)[0];
- let theirs=enemy.splice(Math.floor(Math.random()*enemy.length),1)[0];
- selected=-1;
- el("versus").textContent="A："+names[theirs]+"\nB："+names[mine];
- let result="引き分け";
- if(mine!==theirs){
-  if((mine==="rock"&&theirs==="scissors")||
-     (mine==="scissors"&&theirs==="paper")||
-     (mine==="paper"&&theirs==="rock")){
-   result="自分の勝ち";myWins++;
-  }else{result="相手の勝ち";enemyWins++}
+async function refreshRoom(){
+ try{
+  const {data,error}=await db.rpc("get_oreori_room",{
+   p_code:code,p_token:token
+  });
+  if(error)throw error;
+  if(data.error)throw new Error(data.error);
+
+  room=data;
+  renderRoom();
+ }catch(e){
+  el("connection").textContent="接続エラー："+e.message;
  }
- el("message").textContent=result;
- round++;
- if(round>total){
-  el("message").textContent+="！ 対戦終了";
+}
+
+function renderRoom(){
+ const r=room;
+ if(!r)return;
+
+ el("myName").textContent=r.my_name||"自分";
+ el("opponentName").textContent=r.opponent_name||"相手";
+ el("myWins").textContent=r.my_wins;
+ el("enemyWins").textContent=r.opponent_wins;
+ el("myLeft").textContent=countHand(r.my_hand);
+ el("enemyLeft").textContent=r.opponent_left;
+ el("myHand").textContent=handText(r.my_hand);
+ el("enemyHand").textContent=r.mode==="open"?handText(r.opponent_hand):"非公開";
+
+ el("myDiscard").textContent=r.my_discard?"捨て札："+names[typeof r.my_discard==="string"?r.my_discard: r.my_discard]:"";
+ el("opponentDiscard").textContent=r.mode==="open"&&r.opponent_discard?
+  "相手の捨て札："+names[r.opponent_discard]:"";
+
+ const total=(r.mode==="hidden"||r.mode==="open")?8:9;
+ el("round").textContent=r.status==="finished"?
+  "対戦終了": "第"+Math.min(r.round,total)+"回戦 / 全"+total+"回戦";
+
+ el("discardArea").classList.toggle("hidden",
+  !(r.status==="waiting_discard"&&!r.my_discard));
+ el("playArea").classList.toggle("hidden",r.status!=="playing"||r.has_picked);
+
+ if(r.status==="waiting"){
+  el("message").textContent="友達の参加を待っています";
+ }else if(r.status==="waiting_discard"){
+  el("message").textContent=r.my_discard?
+   "相手の捨て札選択を待っています":"捨てるカードを選んでください";
+ }else if(r.status==="playing"&&r.has_picked){
+  el("message").textContent="相手の選択待ち";
+ }else if(r.status==="playing"){
+  el("message").textContent="カードを選択してください";
+ }else if(r.status==="finished"){
+  el("message").textContent="対戦終了！ 最終結果："+r.my_wins+"対"+r.opponent_wins;
   el("playArea").classList.add("hidden");
- }else render();
+  el("discardArea").classList.add("hidden");
+ }
+
+ if(r.status==="waiting_discard"&&!r.my_discard)drawCards("discardCards",r.my_hand);
+ if(r.status==="playing"&&!r.has_picked)drawCards("playCards",r.my_hand);
+
+ displayHistory(r.history);
+}
+
+async function discardCard(){
+ if(!selected){alert("カードを選択してください");return}
+ try{
+  const {data,error}=await db.rpc("discard_oreori_card",{
+   p_code:code,p_token:token,p_card:selected
+  });
+  if(error)throw error;
+  if(data.error)throw new Error(data.error);
+  selected=null;
+  await refreshRoom();
+ }catch(e){el("message").textContent=e.message}
+}
+
+async function playCard(){
+ if(!selected){alert("カードを選択してください");return}
+ const card=selected;
+ el("playButton").disabled=true;
+ try{
+  const {data,error}=await db.rpc("play_oreori_card",{
+   p_code:code,p_token:token,p_card:card
+  });
+  if(error)throw error;
+  if(data.error)throw new Error(data.error);
+  selected=null;
+  await refreshRoom();
+ }catch(e){
+  el("message").textContent=e.message;
+ }finally{
+  el("playButton").disabled=false;
+ }
 }
 </script>
 </body>
