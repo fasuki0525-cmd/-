@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -24,14 +23,14 @@ input,select{max-width:100%}
 .player-heading{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .player-name{font-weight:bold;font-size:15px}
 .score{font-size:13px;color:#d8e6f5}
-.hand-row{display:flex;justify-content:center;gap:5px;overflow-x:auto;padding:10px 2px;min-height:83px}
+.hand-row{display:flex;justify-content:center;gap:5px;overflow-x:auto;padding:12px 2px;min-height:83px}
 .hand-card{flex:0 0 48px;height:66px;border:2px solid #647b98;border-radius:9px;background:#354963;color:white;font-size:24px;display:flex;align-items:center;justify-content:center;padding:0;margin:0;transition:transform .16s,border .16s}
 .hand-card.selected{transform:translateY(-9px);border:3px solid #ffe36c;background:#526b8c}
 .hand-card.back{background:linear-gradient(135deg,#304b70,#172b48);border-color:#7895bb}
 #center-area{background:#111e30;border:1px solid #40536e;border-radius:15px;padding:12px 6px}
 #played-cards{display:flex;justify-content:center;align-items:center;gap:12px;min-height:120px}
 .played-side{display:flex;align-items:center;gap:6px}
-.played-card{width:75px;height:105px;border:2px solid #7189a8;border-radius:12px;background:#354963;display:flex;align-items:center;justify-content:center;font-size:35px;position:relative;perspective:500px}
+.played-card{width:75px;height:105px;border:2px solid #7189a8;border-radius:12px;background:#354963;display:flex;align-items:center;justify-content:center;font-size:35px}
 .played-card.back{background:linear-gradient(145deg,#42638d,#182b48);font-size:30px}
 .played-card.reveal{animation:flip .55s ease both}
 .played-card.win{border:4px solid #ffe36c;box-shadow:0 0 18px #ffe36c}
@@ -46,12 +45,8 @@ input,select{max-width:100%}
 #result-label.draw{color:#91d9ff}
 #final-result{background:#263b56;border:2px solid #ffe36c;border-radius:14px;padding:18px;margin-top:12px}
 #final-title{font-size:25px;font-weight:bold;color:#ffe36c}
-#discardArea,#playArea{background:#172438;border-radius:12px;padding:12px;margin-top:10px}
-.choice-row{display:flex;justify-content:center;flex-wrap:wrap;gap:5px}
-.choice-card{min-width:85px;min-height:70px;font-size:22px;background:#354963;border:2px solid #647b98}
-.choice-card.selected{border:3px solid #ffe36c;transform:translateY(-5px)}
-#playButton,#discardButton{width:85%;max-width:300px;margin-top:12px}
-#versus{font-size:12px;color:#b9c8da}
+.action-area{background:#172438;border-radius:12px;padding:12px;margin-top:10px}
+.action-button{width:85%;max-width:300px;margin-top:12px}
 #version{position:fixed;right:10px;bottom:7px;font-size:12px;color:#aaa;z-index:9999}
 hr{border:0;border-top:1px solid #526176;margin:15px 0}
 @media(max-width:380px){
@@ -83,6 +78,7 @@ hr{border:0;border-top:1px solid #526176;margin:15px 0}
 <p>チョキ <input id="scissorsCount" type="number" min="0" max="9" value="3"></p>
 <p>パー <input id="paperCount" type="number" min="0" max="9" value="3"></p>
 <p id="countText">合計：9 / 9枚</p>
+<label><input id="customHandVisible" type="checkbox"> 相手の手札を公開する</label>
 </div>
 
 <p><button onclick="createRoom()">ルームを作る</button></p>
@@ -136,16 +132,16 @@ hr{border:0;border-top:1px solid #526176;margin:15px 0}
 </div>
 </div>
 
-<div id="discardArea" class="hidden">
-<h3>捨てるカードを1枚選択</h3>
-<div id="discardCards" class="choice-row"></div>
-<button id="discardButton" onclick="discardCard()">このカードを捨てる</button>
+<div id="discardArea" class="action-area hidden">
+<h3>捨てるカードを選択してください</h3>
+<p class="small">下の自分の手札を直接タップしてください。</p>
+<button id="discardButton" class="action-button" onclick="discardCard()">このカードを捨てる</button>
 </div>
 
-<div id="playArea" class="hidden">
-<h3>出すカードを選択</h3>
-<div id="playCards" class="choice-row"></div>
-<button id="playButton" onclick="playCard()">選択完了</button>
+<div id="playArea" class="action-area hidden">
+<h3>出すカードを選択してください</h3>
+<p class="small">下の自分の手札を直接タップしてください。</p>
+<button id="playButton" class="action-button" onclick="playCard()">選択完了</button>
 </div>
 
 <div id="final-result" class="hidden">
@@ -158,7 +154,7 @@ hr{border:0;border-top:1px solid #526176;margin:15px 0}
 </section>
 </main>
 
-<div id="version">ver 0.3.0</div>
+<div id="version">ver 0.4.0</div>
 
 <script>
 const SUPABASE_URL="https://zsoebwqiglefbiddjynz.supabase.co";
@@ -226,7 +222,12 @@ async function createRoom(){
   code=makeCode();
 
   const {data,error}=await db.rpc("create_oreori_room",{
-   p_code:code,p_token:token,p_name:name,p_mode:mode,p_hand:hand
+   p_code:code,
+   p_token:token,
+   p_name:name,
+   p_mode:mode,
+   p_hand:hand,
+   p_custom_hand_visible:mode==="custom"&&el("customHandVisible").checked
   });
   if(error)throw error;
   if(data.error)throw new Error(data.error);
@@ -292,25 +293,26 @@ function drawHand(id,h,faceDown=false){
   }
   return;
  }
- cardArray(h).forEach(card=>{
-  const b=document.createElement("button");
-  b.className="hand-card";
-  b.textContent=names[card];
-  area.appendChild(b);
- });
-}
 
-function drawChoices(id,h){
- const area=el(id);
- area.innerHTML="";
  cardArray(h).forEach(card=>{
   const b=document.createElement("button");
-  b.className="choice-card"+(selected===card?" selected":"");
-  b.textContent=names[card]+" "+labels[card];
-  b.onclick=()=>{
-   selected=card;
-   drawChoices(id,h);
-  };
+  b.className="hand-card"+(selected===card&&id==="myHand"?" selected":"");
+  b.textContent=names[card];
+
+  if(id==="myHand"){
+   const canSelect=room&&(
+    (room.status==="waiting_discard"&&!room.my_discard)||
+    (room.status==="playing"&&!room.has_picked)
+   );
+   if(canSelect){
+    b.onclick=()=>{
+     selected=card;
+     renderRoom();
+    };
+   }else{
+    b.disabled=true;
+   }
+  }
   area.appendChild(b);
  });
 }
@@ -419,27 +421,29 @@ function renderRoom(){
 
  drawHand("myHand",r.my_hand);
 
- if(r.mode==="open"){
+ if(r.opponent_hand){
   drawHand("enemyHand",r.opponent_hand);
  }else{
   drawHand("enemyHand",{rock:r.opponent_left,scissors:0,paper:0},true);
  }
 
  el("myDiscard").textContent=r.my_discard?
-  "捨て札："+names[typeof r.my_discard==="string"?r.my_discard:r.my_discard]:"";
+  "捨て札："+names[r.my_discard]:"";
 
- el("opponentDiscard").textContent=r.mode==="open"&&r.opponent_discard?
+ el("opponentDiscard").textContent=r.opponent_discard?
   "相手の捨て札："+names[r.opponent_discard]:"";
 
  const total=(r.mode==="hidden"||r.mode==="open")?8:9;
  el("round").textContent=r.status==="finished"?
   "対戦終了":"第"+Math.min(r.round,total)+"回戦 / 全"+total+"回戦";
 
- el("discardArea").classList.toggle("hidden",
-  !(r.status==="waiting_discard"&&!r.my_discard));
+ const canDiscard=r.status==="waiting_discard"&&!r.my_discard;
+ const canPlay=r.status==="playing"&&!r.has_picked;
 
- el("playArea").classList.toggle("hidden",
-  !(r.status==="playing"&&!r.has_picked));
+ el("discardArea").classList.toggle("hidden",!canDiscard);
+ el("playArea").classList.toggle("hidden",!canPlay);
+ el("discardButton").disabled=!selected;
+ el("playButton").disabled=!selected;
 
  if(r.status==="waiting"){
   el("message").textContent="友達の参加を待っています";
@@ -453,13 +457,6 @@ function renderRoom(){
  }else if(r.status==="finished"){
   el("message").textContent="対戦終了！";
   showFinalResult();
- }
-
- if(r.status==="waiting_discard"&&!r.my_discard){
-  drawChoices("discardCards",r.my_hand);
- }
- if(r.status==="playing"&&!r.has_picked){
-  drawChoices("playCards",r.my_hand);
  }
 
  if(!animatingHistory)displayHistory(r.history);
@@ -502,8 +499,5 @@ async function playCard(){
  }
 }
 </script>
-<div style="position:fixed;right:10px;bottom:8px;font-size:12px;color:#aaa;z-index:9999">
-  ver 0.2.0
-</div>
 </body>
 </html>
