@@ -49,6 +49,8 @@ input,select{max-width:100%}
 #rematchArea{margin-top:16px}
 .action-area{background:#172438;border-radius:12px;padding:12px;margin-top:10px}
 .action-button{width:85%;max-width:300px;margin-top:12px}
+.danger-button{background:#a63f48}
+.home-button{background:#49658b}
 #version{position:fixed;right:10px;bottom:7px;font-size:12px;color:#aaa;z-index:9999}
 hr{border:0;border-top:1px solid #526176;margin:15px 0}
 .profile-button{background:#49658b}
@@ -185,12 +187,22 @@ section{padding:9px}
 <button id="rematchButton" class="action-button" onclick="requestRematch()">もう一度</button>
 </div>
 </div>
+<<<<<<< HEAD
+
+<div class="action-area">
+<button id="leaveWaitingButton" class="home-button action-button hidden" onclick="leaveWaitingRoom()">ホームに戻る</button>
+<button id="surrenderButton" class="danger-button action-button hidden" onclick="surrenderMatch()">降参してホームに戻る</button>
+<button id="finishedHomeButton" class="home-button action-button hidden" onclick="returnHomeAfterFinished()">ホームに戻る</button>
+</div>
+
+=======
+>>>>>>> cee64430ebb3731e1ce578f7ec38d123943a6f47
 <p id="message"></p>
 <p class="small" id="connection"></p>
 </section>
 </main>
 
-<div id="version">ver 0.7.0</div>
+<div id="version">ver 0.7.1</div>
 
 <script>
 const SUPABASE_URL="https://zsoebwqiglefbiddjynz.supabase.co";
@@ -345,11 +357,36 @@ function clearSession(){
  localStorage.removeItem("oreori_player");
 }
 
+function stopPolling(){
+ if(polling){
+  clearInterval(polling);
+  polling=null;
+ }
+}
+
 function showGame(){
  el("home").classList.add("hidden");
+ el("profile").classList.add("hidden");
  el("game").classList.remove("hidden");
  el("roomCode").textContent="ルームコード："+code;
  el("connection").textContent="オンライン接続中";
+}
+
+function resetToHome(message=""){
+ stopPolling();
+ clearSession();
+ code="";
+ token="";
+ player=0;
+ room=null;
+ selected=null;
+ lastHistory=0;
+ rematchRequested=false;
+ animatingHistory=false;
+ el("game").classList.add("hidden");
+ el("profile").classList.add("hidden");
+ el("home").classList.remove("hidden");
+ el("homeMessage").textContent=message;
 }
 
 async function createRoom(){
@@ -525,13 +562,31 @@ function showFinalResult(){
  if(!room||room.status!=="finished")return;
  el("final-result").classList.remove("hidden");
  el("final-score").textContent=room.my_name+" "+room.my_wins+"勝 － "+room.opponent_wins+"勝 "+room.opponent_name;
- el("final-title").textContent=room.my_wins>room.opponent_wins?"あなたの勝利！":room.my_wins<room.opponent_wins?"相手の勝利！":"引き分け";
+
+ const surrendered=room.finish_reason==="surrender";
+ if(surrendered){
+  const iWon=Number(room.winner)===player;
+  el("final-title").textContent=iWon
+   ?"相手が降参しました。あなたの勝利！"
+   :"降参しました。あなたの敗北";
+  el("final-score").textContent=iWon
+   ?"相手の降参により勝利しました。"
+   :"あなたの降参により敗北しました。";
+  el("rematchArea").classList.add("hidden");
+ }else{
+  el("final-title").textContent=room.my_wins>room.opponent_wins
+   ?"あなたの勝利！"
+   :room.my_wins<room.opponent_wins
+   ?"相手の勝利！"
+   :"引き分け";
+  el("rematchArea").classList.remove("hidden");
+  el("rematchButton").disabled=rematchRequested;
+  if(rematchRequested){
+   el("rematchMessage").textContent="再戦希望を送信しました。相手の操作を待っています。";
+  }
+ }
  el("playArea").classList.add("hidden");
  el("discardArea").classList.add("hidden");
- el("rematchButton").disabled=rematchRequested;
- if(rematchRequested){
-  el("rematchMessage").textContent="再戦希望を送信しました。相手の操作を待っています。";
- }
 }
 
 async function requestRematch(){
@@ -567,13 +622,26 @@ async function refreshRoom(){
   });
   if(error)throw error;
   if(data?.error)throw new Error(data.error);
+
   const wasFinished=room&&room.status==="finished";
   room=data;
+
+  if(room.status==="finished"){
+   const{data:outcome,error:outcomeError}=await db.rpc("oreori_get_room_outcome",{
+    p_code:code,p_token:token
+   });
+   if(!outcomeError&&!outcome?.error){
+    room.winner=outcome.winner;
+    room.finish_reason=outcome.finish_reason;
+   }
+  }
+
   if(wasFinished&&room.status!=="finished"){
    lastHistory=0;
    selected=null;
    rematchRequested=false;
    el("final-result").classList.add("hidden");
+   el("rematchArea").classList.remove("hidden");
    showBackCards();
   }
   renderRoom();
@@ -587,6 +655,7 @@ async function refreshRoom(){
 function renderRoom(){
  const r=room;
  if(!r)return;
+
  el("myName").textContent=r.my_name||"自分";
  el("opponentName").textContent=r.opponent_name||"相手";
  el("myWins").textContent=r.my_wins??0;
@@ -595,25 +664,41 @@ function renderRoom(){
  el("enemyScore").textContent=r.opponent_wins??0;
  el("myLeft").textContent=countHand(r.my_hand);
  el("enemyLeft").textContent=r.opponent_left??0;
+
  if(selected&&Number(r.my_hand?.[selected]||0)<=0)selected=null;
  drawHand("myHand",r.my_hand);
+
  if(r.opponent_hand){
   drawHand("enemyHand",r.opponent_hand);
  }else{
   drawHand("enemyHand",{rock:Number(r.opponent_left||0),scissors:0,paper:0},true);
  }
+
  el("myDiscard").textContent=r.my_discard?"捨て札："+names[r.my_discard]:"";
  el("opponentDiscard").textContent=r.opponent_discard?"相手の捨て札："+names[r.opponent_discard]:"";
+
  const total=(r.mode==="hidden"||r.mode==="open")?8:9;
  el("round").textContent=r.status==="finished"
   ?"対戦終了"
   :"第"+Math.min(Number(r.round||1),total)+"回戦 / 全"+total+"回戦";
+
  const canDiscard=r.status==="waiting_discard"&&!r.my_discard&&!animatingHistory&&!actionBusy;
  const canPlay=r.status==="playing"&&!r.has_picked&&!animatingHistory&&!actionBusy;
+
  el("discardArea").classList.toggle("hidden",!canDiscard);
  el("playArea").classList.toggle("hidden",!canPlay);
  el("discardButton").disabled=!selected||actionBusy;
  el("playButton").disabled=!selected||actionBusy;
+
+ const waitingWithoutOpponent=
+  player===1&&
+  (r.status==="waiting"||r.status==="waiting_discard")&&
+  !r.opponent_name;
+
+ el("leaveWaitingButton").classList.toggle("hidden",!waitingWithoutOpponent);
+ el("surrenderButton").classList.toggle("hidden",r.status!=="playing");
+ el("finishedHomeButton").classList.toggle("hidden",r.status!=="finished");
+
  if(r.status==="waiting"){
   el("message").textContent="友達の参加を待っています";
  }else if(r.status==="waiting_discard"){
@@ -626,9 +711,58 @@ function renderRoom(){
   el("message").textContent="対戦終了！";
   showFinalResult();
  }
+
  if(!animatingHistory&&Array.isArray(r.history)&&r.history.length>lastHistory){
   displayHistory(r.history);
  }
+}
+
+async function leaveWaitingRoom(){
+ if(actionBusy||!room)return;
+ if(!confirm("待機ルームを終了してホームに戻りますか？"))return;
+
+ actionBusy=true;
+ el("leaveWaitingButton").disabled=true;
+ try{
+  const{data,error}=await db.rpc("oreori_leave_waiting_room",{
+   p_code:code,p_token:token
+  });
+  if(error)throw error;
+  if(data?.error)throw new Error(data.error);
+  resetToHome("待機ルームを終了しました。");
+ }catch(e){
+  el("message").textContent=e.message||String(e);
+  el("leaveWaitingButton").disabled=false;
+ }finally{
+  actionBusy=false;
+ }
+}
+
+async function surrenderMatch(){
+ if(actionBusy||!room||room.status!=="playing")return;
+ if(!confirm("降参してホームに戻りますか？この操作は取り消せません。"))return;
+
+ actionBusy=true;
+ el("surrenderButton").disabled=true;
+ try{
+  const{data,error}=await db.rpc("oreori_surrender",{
+   p_code:code,p_token:token
+  });
+  if(error)throw error;
+  if(data?.error)throw new Error(data.error);
+  await refreshRoom();
+ }catch(e){
+  el("message").textContent=e.message||String(e);
+  el("surrenderButton").disabled=false;
+ }finally{
+  actionBusy=false;
+  if(room)renderRoom();
+ }
+}
+
+function returnHomeAfterFinished(){
+ if(!room||room.status!=="finished")return;
+ resetToHome("対戦結果を確認しました。");
 }
 
 async function discardCard(){
@@ -678,17 +812,17 @@ async function restoreSession(){
  const savedToken=localStorage.getItem("oreori_token");
  const savedPlayer=Number(localStorage.getItem("oreori_player"));
  if(!savedCode||!savedToken||![1,2].includes(savedPlayer))return;
+
  code=savedCode;
  token=savedToken;
  player=savedPlayer;
  showGame();
  await refreshRoom();
+
  if(room){
   startPolling();
  }else{
-  clearSession();
-  el("game").classList.add("hidden");
-  el("home").classList.remove("hidden");
+  resetToHome("保存されていた対戦ルームが見つかりませんでした。");
  }
 }
 
