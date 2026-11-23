@@ -282,7 +282,7 @@ async function loadInventory(){
   '<div class="gacha-item rarity-'+escapeHtml(x.rarity)+'">'+
   '<strong style="color:'+(rarityColors[x.rarity]||"white")+'">'+escapeHtml(x.display_name)+'</strong>'+
   '<div>'+escapeHtml(x.rarity)+'ランク / '+escapeHtml(categoryNames[x.category]||x.category)+' / 所持 '+Number(x.count)+'個</div>'+
-  '<button onclick="equipItem(\\''+encodeURIComponent(x.item_id)+'\\')">装備する</button></div>'
+  '<button onclick="equipItem(&quot;'+encodeURIComponent(x.item_id)+'&quot;)">装備する</button></div>'
  ).join(""):"まだアイテムを所持していません";
  el("inventoryList").innerHTML=html;
  el("profileInventory").innerHTML=html;
