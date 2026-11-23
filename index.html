@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -50,6 +51,11 @@ input,select{max-width:100%}
 .action-button{width:85%;max-width:300px;margin-top:12px}
 #version{position:fixed;right:10px;bottom:7px;font-size:12px;color:#aaa;z-index:9999}
 hr{border:0;border-top:1px solid #526176;margin:15px 0}
+.profile-button{background:#49658b}
+.profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:left}
+.profile-stat{background:#172438;padding:12px;border-radius:10px}
+.profile-stat strong{display:block;font-size:22px;margin-top:5px}
+.profile-line{text-align:left;margin:10px 0;overflow-wrap:anywhere}
 @media(max-width:380px){
 body{padding:6px}
 section{padding:9px}
@@ -64,6 +70,7 @@ section{padding:9px}
 <p>友達とじゃんけん対戦</p>
 
 <section id="home">
+<button class="profile-button" onclick="openProfile()">プロフィール</button>
 <div class="action-area">
 <h2>ルームを作る</h2>
 <p><input id="createName" maxlength="12" placeholder="自分の名前"></p>
@@ -93,6 +100,31 @@ section{padding:9px}
 <button id="joinButton" onclick="joinRoom()">参加する</button>
 </div>
 <p id="homeMessage" class="small"></p>
+</section>
+
+<section id="profile" class="hidden">
+<h2>プロフィール</h2>
+<div id="profileMessage" class="small"></div>
+<div class="profile-line">プレイヤーID：<strong id="profileId">---</strong></div>
+<div class="profile-line">名前：<input id="profileName" maxlength="12" placeholder="1〜12文字"></div>
+<div class="profile-line">アイコン：
+<select id="profileIcon">
+<option value="default_male">男性アイコン</option>
+<option value="default_female">女性アイコン</option>
+</select></div>
+<div class="profile-grid">
+<div class="profile-stat">総対戦数<strong id="profileMatches">0</strong></div>
+<div class="profile-stat">勝率<strong id="profileRate">0%</strong></div>
+<div class="profile-stat">勝利<strong id="profileWins">0</strong></div>
+<div class="profile-stat">敗北<strong id="profileLosses">0</strong></div>
+<div class="profile-stat">引き分け<strong id="profileDraws">0</strong></div>
+</div>
+<hr>
+<h3>装備中のスキン</h3>
+<div id="profileSkins" class="profile-line">読み込み中</div>
+<p><button onclick="saveProfile()">変更を保存</button></p>
+<p><button class="profile-button" onclick="closeProfile()">ホームに戻る</button></p>
+<p class="small">現在は初期アイコンと初期スキンのみ選択できます。ガチャ実装後に所持スキンを装備できるようになります。</p>
 </section>
 
 <section id="game" class="hidden">
@@ -163,7 +195,7 @@ section{padding:9px}
 </section>
 </main>
 
-<div id="version">ver 0.6.0</div>
+<div id="version">ver 0.7.0</div>
 
 <script>
 const SUPABASE_URL="https://zsoebwqiglefbiddjynz.supabase.co";
@@ -183,12 +215,83 @@ async function ensureAccount(name="プレイヤー"){
 }
 
 const names={rock:"✊",scissors:"✌️",paper:"✋"};
+let currentProfile=null;
+
 let code="",token="",player=0,mode="normal",selected=null,room=null;
 let lastHistory=0,polling=null,animatingHistory=false;
 let refreshing=false,actionBusy=false,rematchRequested=false;
 
 const el=id=>document.getElementById(id);
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+
+async function openProfile(){
+ try{
+  el("home").classList.add("hidden");
+  el("profile").classList.remove("hidden");
+  el("profileMessage").textContent="プロフィールを読み込み中...";
+  const name=el("createName").value.trim()||el("joinName").value.trim()||"プレイヤー";
+  await ensureAccount(name);
+  const {data,error}=await db.rpc("oreori_get_my_profile");
+  if(error)throw error;
+  currentProfile=data;
+  el("profileId").textContent=data.player_id||"未発行";
+  el("profileName").value=data.display_name||"プレイヤー";
+  el("profileIcon").value=data.icon_id||"default_male";
+  const w=Number(data.wins||0),l=Number(data.losses||0),d=Number(data.draws||0);
+  const total=w+l+d,decided=w+l;
+  el("profileMatches").textContent=total;
+  el("profileRate").textContent=(decided?Math.round(w/decided*100):0)+"%";
+  el("profileWins").textContent=w;
+  el("profileLosses").textContent=l;
+  el("profileDraws").textContent=d;
+  const q=data.equipped||{};
+  const labels={
+   rock_default:"グー：初期スキン",
+   scissors_default:"チョキ：初期スキン",
+   paper_default:"パー：初期スキン",
+   background_default:"背景：初期背景"
+  };
+  el("profileSkins").textContent=[
+   labels[q.rock_skin]||"グー："+(q.rock_skin||"未設定"),
+   labels[q.scissors_skin]||"チョキ："+(q.scissors_skin||"未設定"),
+   labels[q.paper_skin]||"パー："+(q.paper_skin||"未設定"),
+   labels[q.background_skin]||"背景："+(q.background_skin||"未設定")
+  ].join(" / ");
+  el("profileMessage").textContent="プロフィールを読み込みました";
+ }catch(e){
+  el("profileMessage").textContent="読み込み失敗："+(e.message||String(e));
+ }
+}
+
+function closeProfile(){
+ el("profile").classList.add("hidden");
+ el("home").classList.remove("hidden");
+}
+
+async function saveProfile(){
+ if(!currentProfile)return;
+ const b=el("profile").querySelector("button[onclick='saveProfile()']");
+ b.disabled=true;
+ try{
+  const q=currentProfile.equipped||{};
+  const {error}=await db.rpc("oreori_update_profile",{
+   p_name:el("profileName").value,
+   p_icon_id:el("profileIcon").value,
+   p_rock_skin:q.rock_skin||"rock_default",
+   p_scissors_skin:q.scissors_skin||"scissors_default",
+   p_paper_skin:q.paper_skin||"paper_default",
+   p_background_skin:q.background_skin||"background_default"
+  });
+  if(error)throw error;
+  el("profileMessage").textContent="プロフィールを保存しました";
+  currentProfile.display_name=el("profileName").value.trim();
+  currentProfile.icon_id=el("profileIcon").value;
+ }catch(e){
+  el("profileMessage").textContent="保存失敗："+(e.message||String(e));
+ }finally{
+  b.disabled=false;
+ }
+}
 
 el("mode").addEventListener("change",()=>{
  el("customArea").classList.toggle("hidden",el("mode").value!=="custom");
@@ -251,7 +354,6 @@ async function createRoom(){
  if(actionBusy)return;
  actionBusy=true;
  el("createButton").disabled=true;
-
  try{
   mode=el("mode").value;
   const hand=makeHand();
@@ -260,25 +362,17 @@ async function createRoom(){
   token=makeToken();
   code=makeCode();
   rematchRequested=false;
-
   const{data,error}=await db.rpc("create_oreori_room",{
-   p_code:code,
-   p_token:token,
-   p_name:name,
-   p_mode:mode,
-   p_hand:hand,
+   p_code:code,p_token:token,p_name:name,p_mode:mode,p_hand:hand,
    p_custom_hand_visible:mode==="custom"&&el("customHandVisible").checked
   });
-
   if(error)throw error;
   if(data?.error)throw new Error(data.error);
-
   player=1;
   saveSession();
   showGame();
   await refreshRoom();
   startPolling();
-
  }catch(e){
   el("homeMessage").textContent=e.message||String(e);
  }finally{
@@ -291,37 +385,24 @@ async function joinRoom(){
  if(actionBusy)return;
  actionBusy=true;
  el("joinButton").disabled=true;
-
  try{
   const name=el("joinName").value.trim()||"プレイヤー2";
   await ensureAccount(name);
   code=el("joinCode").value.trim().toUpperCase();
-
   if(!code)throw new Error("ルームコードを入力してください");
-
   token=makeToken();
   rematchRequested=false;
-
   const{data,error}=await db.rpc("join_oreori_room",{
-   p_code:code,
-   p_token:token,
-   p_name:name,
-   p_hand:{rock:3,scissors:3,paper:3}
+   p_code:code,p_token:token,p_name:name,p_hand:{rock:3,scissors:3,paper:3}
   });
-
   if(error)throw error;
   if(data?.error)throw new Error(data.error);
-
   player=Number(data.player);
-  if(player!==1&&player!==2){
-   throw new Error("参加者情報を取得できませんでした");
-  }
-
+  if(player!==1&&player!==2)throw new Error("参加者情報を取得できませんでした");
   saveSession();
   showGame();
   await refreshRoom();
   startPolling();
-
  }catch(e){
   el("homeMessage").textContent=e.message||String(e);
  }finally{
@@ -351,7 +432,6 @@ function cardArray(h){
 function drawHand(id,h,faceDown=false){
  const area=el(id);
  area.innerHTML="";
-
  if(faceDown){
   for(let i=0;i<countHand(h);i++){
    const c=document.createElement("div");
@@ -361,28 +441,21 @@ function drawHand(id,h,faceDown=false){
   }
   return;
  }
-
  cardArray(h).forEach(card=>{
   const b=document.createElement("button");
   b.className="hand-card"+(selected===card&&id==="myHand"?" selected":"");
   b.textContent=names[card];
-
   if(id==="myHand"){
    const canSelect=!actionBusy&&!animatingHistory&&room&&(
     (room.status==="waiting_discard"&&!room.my_discard)||
     (room.status==="playing"&&!room.has_picked)
    );
-
    if(canSelect){
-    b.onclick=()=>{
-     selected=card;
-     renderRoom();
-    };
+    b.onclick=()=>{selected=card;renderRoom();};
    }else{
     b.disabled=true;
    }
   }
-
   area.appendChild(b);
  });
 }
@@ -399,17 +472,13 @@ function showBackCards(){
 
 async function displayHistory(history){
  if(!Array.isArray(history)||history.length<=lastHistory||animatingHistory)return;
-
  animatingHistory=true;
  const pending=history.slice(lastHistory);
-
  for(const item of pending){
   lastHistory++;
   await displayOneRound(item);
  }
-
  animatingHistory=false;
-
  if(room){
   renderRoom();
   if(room.status==="finished")showFinalResult();
@@ -421,57 +490,43 @@ async function displayOneRound(item){
  const p2=item.player2_card;
  const myCard=player===1?p1:p2;
  const enemyCard=player===1?p2:p1;
-
  el("playArea").classList.add("hidden");
  el("discardArea").classList.add("hidden");
  showBackCards();
-
  el("message").textContent="両者のカードが選ばれました";
-
  for(const n of ["3","2","1"]){
   el("countdown").textContent=n;
   await wait(300);
  }
-
  el("countdown").textContent="";
  el("enemyPlayed").className="played-card reveal";
  el("enemyPlayed").textContent=names[enemyCard]||"?";
  el("myPlayed").className="played-card reveal";
  el("myPlayed").textContent=names[myCard]||"?";
-
  await wait(650);
-
  const result=item.result;
  let mine="draw";
-
  if(result!=="draw"){
   const won=(result==="player1"&&player===1)||(result==="player2"&&player===2);
   mine=won?"win":"lose";
  }
-
  el("enemyPlayed").className="played-card "+(mine==="win"?"lose":mine==="lose"?"win":"draw");
  el("myPlayed").className="played-card "+(mine==="win"?"win":mine==="lose"?"lose":"draw");
-
  const label=el("result-label");
  label.className=mine;
  label.textContent=mine==="win"?"YOU WIN!":mine==="lose"?"YOU LOSE":"DRAW";
-
  el("message").textContent=mine==="win"?"この勝負はあなたの勝ちです":mine==="lose"?"この勝負は相手の勝ちです":"引き分けです";
-
  await wait(1000);
 }
 
 function showFinalResult(){
  if(!room||room.status!=="finished")return;
-
  el("final-result").classList.remove("hidden");
  el("final-score").textContent=room.my_name+" "+room.my_wins+"勝 － "+room.opponent_wins+"勝 "+room.opponent_name;
  el("final-title").textContent=room.my_wins>room.opponent_wins?"あなたの勝利！":room.my_wins<room.opponent_wins?"相手の勝利！":"引き分け";
-
  el("playArea").classList.add("hidden");
  el("discardArea").classList.add("hidden");
  el("rematchButton").disabled=rematchRequested;
-
  if(rematchRequested){
   el("rematchMessage").textContent="再戦希望を送信しました。相手の操作を待っています。";
  }
@@ -479,27 +534,19 @@ function showFinalResult(){
 
 async function requestRematch(){
  if(actionBusy||!room||room.status!=="finished"||rematchRequested)return;
-
  actionBusy=true;
  el("rematchButton").disabled=true;
-
  try{
   const{data,error}=await db.rpc("request_oreori_rematch",{
-   p_code:code,
-   p_token:token
+   p_code:code,p_token:token
   });
-
   if(error)throw error;
   if(data?.error)throw new Error(data.error);
-
   rematchRequested=true;
-
   el("rematchMessage").textContent=data.started
    ?"再戦を開始します。"
    :"再戦希望を送信しました。相手の操作を待っています。";
-
   if(data.started)await refreshRoom();
-
  }catch(e){
   el("rematchMessage").textContent=e.message||String(e);
   el("rematchButton").disabled=false;
@@ -511,21 +558,15 @@ async function requestRematch(){
 
 async function refreshRoom(){
  if(refreshing||!code||!token)return;
-
  refreshing=true;
-
  try{
   const{data,error}=await db.rpc("get_oreori_room",{
-   p_code:code,
-   p_token:token
+   p_code:code,p_token:token
   });
-
   if(error)throw error;
   if(data?.error)throw new Error(data.error);
-
   const wasFinished=room&&room.status==="finished";
   room=data;
-
   if(wasFinished&&room.status!=="finished"){
    lastHistory=0;
    selected=null;
@@ -533,9 +574,7 @@ async function refreshRoom(){
    el("final-result").classList.add("hidden");
    showBackCards();
   }
-
   renderRoom();
-
  }catch(e){
   el("connection").textContent="接続エラー："+(e.message||String(e));
  }finally{
@@ -546,7 +585,6 @@ async function refreshRoom(){
 function renderRoom(){
  const r=room;
  if(!r)return;
-
  el("myName").textContent=r.my_name||"自分";
  el("opponentName").textContent=r.opponent_name||"相手";
  el("myWins").textContent=r.my_wins??0;
@@ -555,38 +593,25 @@ function renderRoom(){
  el("enemyScore").textContent=r.opponent_wins??0;
  el("myLeft").textContent=countHand(r.my_hand);
  el("enemyLeft").textContent=r.opponent_left??0;
-
  if(selected&&Number(r.my_hand?.[selected]||0)<=0)selected=null;
-
  drawHand("myHand",r.my_hand);
-
  if(r.opponent_hand){
   drawHand("enemyHand",r.opponent_hand);
  }else{
-  drawHand("enemyHand",{
-   rock:Number(r.opponent_left||0),
-   scissors:0,
-   paper:0
-  },true);
+  drawHand("enemyHand",{rock:Number(r.opponent_left||0),scissors:0,paper:0},true);
  }
-
  el("myDiscard").textContent=r.my_discard?"捨て札："+names[r.my_discard]:"";
  el("opponentDiscard").textContent=r.opponent_discard?"相手の捨て札："+names[r.opponent_discard]:"";
-
  const total=(r.mode==="hidden"||r.mode==="open")?8:9;
-
  el("round").textContent=r.status==="finished"
   ?"対戦終了"
   :"第"+Math.min(Number(r.round||1),total)+"回戦 / 全"+total+"回戦";
-
  const canDiscard=r.status==="waiting_discard"&&!r.my_discard&&!animatingHistory&&!actionBusy;
  const canPlay=r.status==="playing"&&!r.has_picked&&!animatingHistory&&!actionBusy;
-
  el("discardArea").classList.toggle("hidden",!canDiscard);
  el("playArea").classList.toggle("hidden",!canPlay);
  el("discardButton").disabled=!selected||actionBusy;
  el("playButton").disabled=!selected||actionBusy;
-
  if(r.status==="waiting"){
   el("message").textContent="友達の参加を待っています";
  }else if(r.status==="waiting_discard"){
@@ -599,7 +624,6 @@ function renderRoom(){
   el("message").textContent="対戦終了！";
   showFinalResult();
  }
-
  if(!animatingHistory&&Array.isArray(r.history)&&r.history.length>lastHistory){
   displayHistory(r.history);
  }
@@ -607,24 +631,17 @@ function renderRoom(){
 
 async function discardCard(){
  if(actionBusy||!selected)return;
-
  actionBusy=true;
  const card=selected;
  el("discardButton").disabled=true;
-
  try{
   const{data,error}=await db.rpc("discard_oreori_card",{
-   p_code:code,
-   p_token:token,
-   p_card:card
+   p_code:code,p_token:token,p_card:card
   });
-
   if(error)throw error;
   if(data?.error)throw new Error(data.error);
-
   selected=null;
   await refreshRoom();
-
  }catch(e){
   el("message").textContent=e.message||String(e);
  }finally{
@@ -635,24 +652,17 @@ async function discardCard(){
 
 async function playCard(){
  if(actionBusy||!selected)return;
-
  actionBusy=true;
  const card=selected;
  el("playButton").disabled=true;
-
  try{
   const{data,error}=await db.rpc("play_oreori_card",{
-   p_code:code,
-   p_token:token,
-   p_card:card
+   p_code:code,p_token:token,p_card:card
   });
-
   if(error)throw error;
   if(data?.error)throw new Error(data.error);
-
   selected=null;
   await refreshRoom();
-
  }catch(e){
   el("message").textContent=e.message||String(e);
  }finally{
@@ -665,18 +675,12 @@ async function restoreSession(){
  const savedCode=localStorage.getItem("oreori_code");
  const savedToken=localStorage.getItem("oreori_token");
  const savedPlayer=Number(localStorage.getItem("oreori_player"));
-
- if(!savedCode||!savedToken||![1,2].includes(savedPlayer)){
-  return;
- }
-
+ if(!savedCode||!savedToken||![1,2].includes(savedPlayer))return;
  code=savedCode;
  token=savedToken;
  player=savedPlayer;
-
  showGame();
  await refreshRoom();
-
  if(room){
   startPolling();
  }else{
