@@ -50,14 +50,16 @@ input,select{max-width:100%}
 .action-area{background:#172438;border-radius:12px;padding:12px;margin-top:10px}
 .action-button{width:85%;max-width:300px;margin-top:12px}
 .danger-button{background:#a63f48}
-.home-button{background:#49658b}
-#version{position:fixed;right:10px;bottom:7px;font-size:12px;color:#aaa;z-index:9999}
-hr{border:0;border-top:1px solid #526176;margin:15px 0}
-.profile-button{background:#49658b}
+.home-button,.profile-button{background:#49658b}
 .profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:left}
 .profile-stat{background:#172438;padding:12px;border-radius:10px}
 .profile-stat strong{display:block;font-size:22px;margin-top:5px}
 .profile-line{text-align:left;margin:10px 0;overflow-wrap:anywhere}
+.gacha-item{background:#172438;padding:12px;border-radius:10px;margin:6px 0;text-align:left}
+.rarity-B{border:2px solid #aeb8c5}
+.rarity-A{border:2px solid #ff6262}
+.rarity-S{border:2px solid #ffd84d}
+.rarity-X{border:2px solid #d58cff}
 @media(max-width:380px){
 body{padding:6px}
 section{padding:9px}
@@ -72,7 +74,13 @@ section{padding:9px}
 <p>友達とじゃんけん対戦</p>
 
 <section id="home">
+<div class="profile-grid">
+<div class="profile-stat">所持コイン<strong id="homeCoins">---</strong></div>
+<div class="profile-stat">プレイヤー<strong id="homePlayerName">---</strong></div>
+</div>
 <button class="profile-button" onclick="openProfile()">プロフィール</button>
+<button onclick="openGacha()">ガチャ・スキン</button>
+
 <div class="action-area">
 <h2>ルームを作る</h2>
 <h3>ルールを選択</h3>
@@ -123,8 +131,28 @@ section{padding:9px}
 <h3>装備中のスキン</h3>
 <div id="profileSkins" class="profile-line">読み込み中</div>
 <p><button onclick="saveProfile()">変更を保存</button></p>
+<hr>
+<h3>所持アイテム</h3>
+<div id="profileInventory" class="profile-line">読み込み中</div>
 <p><button class="profile-button" onclick="closeProfile()">ホームに戻る</button></p>
-<p class="small">現在は初期アイコンと初期スキンのみ選択できます。ガチャ実装後に所持スキンを装備できるようになります。</p>
+</section>
+
+<section id="gacha" class="hidden">
+<h2>ガチャ・スキン</h2>
+<p>所持コイン：<strong id="gachaCoins">---</strong></p>
+<p>本日のピックアップ：<strong id="gachaCategory">---</strong></p>
+<p class="small">1回 300コイン ／ 10連 3,000コイン</p>
+<p class="small">B：69.7% ／ A：25% ／ S：5% ／ X：0.3%</p>
+<div id="gachaResult" class="profile-grid"></div>
+<div class="action-area">
+<button onclick="rollGacha(1)">1回引く</button>
+<button onclick="rollGacha(10)">10連ガチャ</button>
+</div>
+<div class="action-area">
+<h3>所持スキン・アイテム</h3>
+<div id="inventoryList">読み込み中</div>
+</div>
+<button class="profile-button" onclick="closeGacha()">ホームに戻る</button>
 </section>
 
 <section id="game" class="hidden">
@@ -172,13 +200,11 @@ section{padding:9px}
 <p class="small">下の自分の手札を直接タップしてください。</p>
 <button id="discardButton" class="action-button" onclick="discardCard()">このカードを捨てる</button>
 </div>
-
 <div id="playArea" class="action-area hidden">
 <h3>出すカードを選択してください</h3>
 <p class="small">下の自分の手札を直接タップしてください。</p>
 <button id="playButton" class="action-button" onclick="playCard()">選択完了</button>
 </div>
-
 <div id="final-result" class="hidden">
 <div id="final-title">対戦終了</div>
 <p id="final-score"></p>
@@ -187,70 +213,182 @@ section{padding:9px}
 <button id="rematchButton" class="action-button" onclick="requestRematch()">もう一度</button>
 </div>
 </div>
-<<<<<<< HEAD
-
 <div class="action-area">
 <button id="leaveWaitingButton" class="home-button action-button hidden" onclick="leaveWaitingRoom()">ホームに戻る</button>
 <button id="surrenderButton" class="danger-button action-button hidden" onclick="surrenderMatch()">降参してホームに戻る</button>
 <button id="finishedHomeButton" class="home-button action-button hidden" onclick="returnHomeAfterFinished()">ホームに戻る</button>
 </div>
-
-=======
->>>>>>> cee64430ebb3731e1ce578f7ec38d123943a6f47
 <p id="message"></p>
 <p class="small" id="connection"></p>
 </section>
 </main>
-
-<div id="version">ver 0.7.1</div>
+<div id="version">ver 0.8.0</div>
 
 <script>
 const SUPABASE_URL="https://zsoebwqiglefbiddjynz.supabase.co";
 const SUPABASE_KEY="sb_publishable_Hen6ttVRtEQquLzSTd6scg_laiRjk_b";
 const db=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
-
-async function ensureAccount(name="プレイヤー"){
- const {data:{session},error:sessionError}=await db.auth.getSession();
- if(sessionError) throw sessionError;
- if(!session){
-  const {data,error}=await db.auth.signInAnonymously();
-  if(error) throw error;
- }
- const {data,error}=await db.rpc("oreori_initialize_player",{p_name:name});
- if(error) throw error;
- return data;
-}
-
+const el=id=>document.getElementById(id);
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const names={rock:"✊",scissors:"✌️",paper:"✋"};
+const categoryNames={icon:"アイコン",rock:"グー",scissors:"チョキ",paper:"パー",set:"グー・チョキ・パーセット",all:"オールイン"};
+const rarityColors={B:"#aeb8c5",A:"#ff6262",S:"#ffd84d",X:"#d58cff"};
+
 let currentProfile=null;
-
-async function getProfileDisplayName(){
- const {data,error}=await db.rpc("oreori_get_my_profile");
- if(error) throw error;
- const name=String(data?.display_name||"").trim();
- if(!name) throw new Error("プロフィール名を設定してください");
- return name;
-}
-
+let currentGacha=null;
+let currentInventory=[];
 let code="",token="",player=0,mode="normal",selected=null,room=null;
 let lastHistory=0,polling=null,animatingHistory=false;
 let refreshing=false,actionBusy=false,rematchRequested=false;
 
-const el=id=>document.getElementById(id);
-const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function ensureAccount(name="プレイヤー"){
+ const {data:{session},error:sessionError}=await db.auth.getSession();
+ if(sessionError)throw sessionError;
+ if(!session){
+  const {error}=await db.auth.signInAnonymously();
+  if(error)throw error;
+ }
+ const {data,error}=await db.rpc("oreori_initialize_player",{p_name:name});
+ if(error)throw error;
+ return data;
+}
+
+async function getProfileDisplayName(){
+ const {data,error}=await db.rpc("oreori_get_my_profile");
+ if(error)throw error;
+ const name=String(data?.display_name||"").trim();
+ if(!name)throw new Error("プロフィール名を設定してください");
+ return name;
+}
+
+function escapeHtml(v){
+ return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+async function loadWallet(){
+ try{
+  await ensureAccount();
+  const {data,error}=await db.rpc("oreori_get_gacha_info");
+  if(error)throw error;
+  currentGacha=data;
+  el("homeCoins").textContent=Number(data.coins||0).toLocaleString();
+  el("gachaCoins").textContent=Number(data.coins||0).toLocaleString();
+  el("gachaCategory").textContent=categoryNames[data.category]||data.category;
+  el("homePlayerName").textContent=await getProfileDisplayName();
+ }catch(e){
+  el("homeCoins").textContent="---";
+ }
+}
+
+async function loadInventory(){
+ const {data,error}=await db.rpc("oreori_get_inventory");
+ if(error)throw error;
+ currentInventory=data.items||[];
+ el("gachaCoins").textContent=Number(data.coins||0).toLocaleString();
+ el("homeCoins").textContent=Number(data.coins||0).toLocaleString();
+
+ const html=currentInventory.length?currentInventory.map(x=>
+  '<div class="gacha-item rarity-'+escapeHtml(x.rarity)+'">'+
+  '<strong style="color:'+(rarityColors[x.rarity]||"white")+'">'+escapeHtml(x.display_name)+'</strong>'+
+  '<div>'+escapeHtml(x.rarity)+'ランク / '+escapeHtml(categoryNames[x.category]||x.category)+' / 所持 '+Number(x.count)+'個</div>'+
+  '<button onclick="equipItem(\\''+encodeURIComponent(x.item_id)+'\\')">装備する</button></div>'
+ ).join(""):"まだアイテムを所持していません";
+
+ el("inventoryList").innerHTML=html;
+ el("profileInventory").innerHTML=html;
+}
+
+async function openGacha(){
+ el("home").classList.add("hidden");
+ el("profile").classList.add("hidden");
+ el("gacha").classList.remove("hidden");
+ el("gachaResult").innerHTML="";
+ try{
+  await ensureAccount();
+  await loadWallet();
+  await loadInventory();
+ }catch(e){
+  el("gachaResult").textContent="読み込み失敗："+e.message;
+ }
+}
+
+function closeGacha(){
+ el("gacha").classList.add("hidden");
+ el("home").classList.remove("hidden");
+ loadWallet();
+}
+
+async function rollGacha(count){
+ const category=currentGacha?.category;
+ if(!category)return;
+ if(!confirm((count===10?"10連":"1回")+"ガチャを引きますか？"))return;
+
+ const buttons=el("gacha").querySelectorAll("button");
+ buttons.forEach(b=>b.disabled=true);
+ try{
+  const {data,error}=await db.rpc("oreori_roll_gacha",{p_category:category,p_count:count});
+  if(error)throw error;
+  if(data?.error)throw new Error(data.error);
+
+  el("gachaResult").innerHTML=(data.items||[]).map((x,i)=>
+   '<div class="profile-stat rarity-'+escapeHtml(x.rarity)+'">'+
+   '<div style="font-size:12px">RESULT '+(i+1)+'</div>'+
+   '<strong style="color:'+(rarityColors[x.rarity]||"white")+'">'+escapeHtml(x.rarity)+'ランク</strong>'+
+   '<div>'+escapeHtml(x.display_name)+'</div></div>'
+  ).join("");
+
+  await loadWallet();
+  await loadInventory();
+ }catch(e){
+  el("gachaResult").textContent="ガチャ失敗："+(e.message||String(e));
+ }finally{
+  buttons.forEach(b=>b.disabled=false);
+ }
+}
+
+async function equipItem(encodedId){
+ const itemId=decodeURIComponent(encodedId);
+ try{
+  const {data,error}=await db.rpc("oreori_equip_item",{p_item_id:itemId});
+  if(error)throw error;
+  if(data?.error)throw new Error(data.error);
+  el("gachaResult").textContent="装備を変更しました";
+  await loadInventory();
+  await refreshProfileIfOpen();
+ }catch(e){
+  el("gachaResult").textContent="装備失敗："+e.message;
+ }
+}
+
+async function refreshProfileIfOpen(){
+ if(el("profile").classList.contains("hidden"))return;
+ const {data,error}=await db.rpc("oreori_get_my_profile");
+ if(error||!data)return;
+ currentProfile=data;
+ const q=data.equipped||{};
+ el("profileSkins").textContent=[
+  "グー："+(q.rock_skin||"rock_default"),
+  "チョキ："+(q.scissors_skin||"scissors_default"),
+  "パー："+(q.paper_skin||"paper_default"),
+  "背景："+(q.background_skin||"background_default")
+ ].join(" / ");
+}
 
 async function openProfile(){
  try{
   el("home").classList.add("hidden");
+  el("gacha").classList.add("hidden");
   el("profile").classList.remove("hidden");
   el("profileMessage").textContent="プロフィールを読み込み中...";
   await ensureAccount();
   const {data,error}=await db.rpc("oreori_get_my_profile");
   if(error)throw error;
   currentProfile=data;
+
   el("profileId").textContent=data.player_id||"未発行";
   el("profileName").value=data.display_name||"プレイヤー";
   el("profileIcon").value=data.icon_id||"default_male";
+
   const w=Number(data.wins||0),l=Number(data.losses||0),d=Number(data.draws||0);
   const total=w+l+d,decided=w+l;
   el("profileMatches").textContent=total;
@@ -258,20 +396,18 @@ async function openProfile(){
   el("profileWins").textContent=w;
   el("profileLosses").textContent=l;
   el("profileDraws").textContent=d;
+
   const q=data.equipped||{};
-  const labels={
-   rock_default:"グー：初期スキン",
-   scissors_default:"チョキ：初期スキン",
-   paper_default:"パー：初期スキン",
-   background_default:"背景：初期背景"
-  };
   el("profileSkins").textContent=[
-   labels[q.rock_skin]||"グー："+(q.rock_skin||"未設定"),
-   labels[q.scissors_skin]||"チョキ："+(q.scissors_skin||"未設定"),
-   labels[q.paper_skin]||"パー："+(q.paper_skin||"未設定"),
-   labels[q.background_skin]||"背景："+(q.background_skin||"未設定")
+   "グー："+(q.rock_skin||"rock_default"),
+   "チョキ："+(q.scissors_skin||"scissors_default"),
+   "パー："+(q.paper_skin||"paper_default"),
+   "背景："+(q.background_skin||"background_default")
   ].join(" / ");
+
   el("profileMessage").textContent="プロフィールを読み込みました";
+  await loadWallet();
+  await loadInventory();
  }catch(e){
   el("profileMessage").textContent="読み込み失敗："+(e.message||String(e));
  }
@@ -300,6 +436,7 @@ async function saveProfile(){
   el("profileMessage").textContent="プロフィールを保存しました";
   currentProfile.display_name=el("profileName").value.trim();
   currentProfile.icon_id=el("profileIcon").value;
+  loadWallet();
  }catch(e){
   el("profileMessage").textContent="保存失敗："+(e.message||String(e));
  }finally{
@@ -311,10 +448,7 @@ el("mode").addEventListener("change",()=>{
  el("customArea").classList.toggle("hidden",el("mode").value!=="custom");
  updateCount();
 });
-
-["rockCount","scissorsCount","paperCount"].forEach(id=>{
- el(id).addEventListener("input",updateCount);
-});
+["rockCount","scissorsCount","paperCount"].forEach(id=>el(id).addEventListener("input",updateCount));
 
 function updateCount(){
  const n=Number(el("rockCount").value)+Number(el("scissorsCount").value)+Number(el("paperCount").value);
@@ -337,100 +471,78 @@ function makeHand(){
 function makeToken(){
  return crypto.randomUUID()+crypto.randomUUID();
 }
-
 function makeCode(){
  const chars="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
  const bytes=new Uint8Array(6);
  crypto.getRandomValues(bytes);
  return Array.from(bytes,b=>chars[b%chars.length]).join("");
 }
-
 function saveSession(){
  localStorage.setItem("oreori_code",code);
  localStorage.setItem("oreori_token",token);
  localStorage.setItem("oreori_player",String(player));
 }
-
 function clearSession(){
  localStorage.removeItem("oreori_code");
  localStorage.removeItem("oreori_token");
  localStorage.removeItem("oreori_player");
 }
-
 function stopPolling(){
- if(polling){
-  clearInterval(polling);
-  polling=null;
- }
+ if(polling){clearInterval(polling);polling=null;}
 }
-
 function showGame(){
  el("home").classList.add("hidden");
  el("profile").classList.add("hidden");
+ el("gacha").classList.add("hidden");
  el("game").classList.remove("hidden");
  el("roomCode").textContent="ルームコード："+code;
  el("connection").textContent="オンライン接続中";
 }
-
 function resetToHome(message=""){
- stopPolling();
- clearSession();
- code="";
- token="";
- player=0;
- room=null;
- selected=null;
- lastHistory=0;
- rematchRequested=false;
- animatingHistory=false;
+ stopPolling();clearSession();
+ code="";token="";player=0;room=null;selected=null;
+ lastHistory=0;rematchRequested=false;animatingHistory=false;
  el("game").classList.add("hidden");
  el("profile").classList.add("hidden");
+ el("gacha").classList.add("hidden");
  el("home").classList.remove("hidden");
  el("homeMessage").textContent=message;
+ loadWallet();
 }
 
 async function createRoom(){
  if(actionBusy)return;
- actionBusy=true;
- el("createButton").disabled=true;
+ actionBusy=true;el("createButton").disabled=true;
  try{
   mode=el("mode").value;
   const hand=makeHand();
   await ensureAccount();
   const name=await getProfileDisplayName();
-  token=makeToken();
-  code=makeCode();
-  rematchRequested=false;
+  token=makeToken();code=makeCode();rematchRequested=false;
   const{data,error}=await db.rpc("create_oreori_room",{
    p_code:code,p_token:token,p_name:name,p_mode:mode,p_hand:hand,
    p_custom_hand_visible:mode==="custom"&&el("customHandVisible").checked
   });
   if(error)throw error;
   if(data?.error)throw new Error(data.error);
-  player=1;
-  saveSession();
-  showGame();
-  await refreshRoom();
-  startPolling();
+  player=1;saveSession();showGame();
+  await refreshRoom();startPolling();
  }catch(e){
   el("homeMessage").textContent=e.message||String(e);
  }finally{
-  actionBusy=false;
-  el("createButton").disabled=false;
+  actionBusy=false;el("createButton").disabled=false;
  }
 }
 
 async function joinRoom(){
  if(actionBusy)return;
- actionBusy=true;
- el("joinButton").disabled=true;
+ actionBusy=true;el("joinButton").disabled=true;
  try{
   await ensureAccount();
   const name=await getProfileDisplayName();
   code=el("joinCode").value.trim().toUpperCase();
   if(!code)throw new Error("ルームコードを入力してください");
-  token=makeToken();
-  rematchRequested=false;
+  token=makeToken();rematchRequested=false;
   const{data,error}=await db.rpc("join_oreori_room",{
    p_code:code,p_token:token,p_name:name,p_hand:{rock:3,scissors:3,paper:3}
   });
@@ -438,15 +550,11 @@ async function joinRoom(){
   if(data?.error)throw new Error(data.error);
   player=Number(data.player);
   if(player!==1&&player!==2)throw new Error("参加者情報を取得できませんでした");
-  saveSession();
-  showGame();
-  await refreshRoom();
-  startPolling();
+  saveSession();showGame();await refreshRoom();startPolling();
  }catch(e){
   el("homeMessage").textContent=e.message||String(e);
  }finally{
-  actionBusy=false;
-  el("joinButton").disabled=false;
+  actionBusy=false;el("joinButton").disabled=false;
  }
 }
 
@@ -454,12 +562,10 @@ function startPolling(){
  if(polling)clearInterval(polling);
  polling=setInterval(refreshRoom,1200);
 }
-
 function countHand(h){
  if(!h)return 0;
  return Number(h.rock||0)+Number(h.scissors||0)+Number(h.paper||0);
 }
-
 function cardArray(h){
  const a=[];
  for(let i=0;i<Number(h?.rock||0);i++)a.push("rock");
@@ -467,16 +573,12 @@ function cardArray(h){
  for(let i=0;i<Number(h?.paper||0);i++)a.push("paper");
  return a;
 }
-
 function drawHand(id,h,faceDown=false){
- const area=el(id);
- area.innerHTML="";
+ const area=el(id);area.innerHTML="";
  if(faceDown){
   for(let i=0;i<countHand(h);i++){
    const c=document.createElement("div");
-   c.className="hand-card back";
-   c.textContent="◆";
-   area.appendChild(c);
+   c.className="hand-card back";c.textContent="◆";area.appendChild(c);
   }
   return;
  }
@@ -489,20 +591,15 @@ function drawHand(id,h,faceDown=false){
     (room.status==="waiting_discard"&&!room.my_discard)||
     (room.status==="playing"&&!room.has_picked)
    );
-   if(canSelect){
-    b.onclick=()=>{selected=card;renderRoom();};
-   }else{
-    b.disabled=true;
-   }
+   if(canSelect)b.onclick=()=>{selected=card;renderRoom();};
+   else b.disabled=true;
   }
   area.appendChild(b);
  });
 }
-
 function showBackCards(){
  ["enemyPlayed","myPlayed"].forEach(id=>{
-  el(id).className="played-card back";
-  el(id).textContent="◆";
+  el(id).className="played-card back";el(id).textContent="◆";
  });
  el("countdown").textContent="";
  el("result-label").textContent="";
@@ -513,30 +610,18 @@ async function displayHistory(history){
  if(!Array.isArray(history)||history.length<=lastHistory||animatingHistory)return;
  animatingHistory=true;
  const pending=history.slice(lastHistory);
- for(const item of pending){
-  lastHistory++;
-  await displayOneRound(item);
- }
+ for(const item of pending){lastHistory++;await displayOneRound(item);}
  animatingHistory=false;
- if(room){
-  renderRoom();
-  if(room.status==="finished")showFinalResult();
- }
+ if(room){renderRoom();if(room.status==="finished")showFinalResult();}
 }
-
 async function displayOneRound(item){
- const p1=item.player1_card;
- const p2=item.player2_card;
- const myCard=player===1?p1:p2;
- const enemyCard=player===1?p2:p1;
+ const p1=item.player1_card,p2=item.player2_card;
+ const myCard=player===1?p1:p2,enemyCard=player===1?p2:p1;
  el("playArea").classList.add("hidden");
  el("discardArea").classList.add("hidden");
  showBackCards();
  el("message").textContent="両者のカードが選ばれました";
- for(const n of ["3","2","1"]){
-  el("countdown").textContent=n;
-  await wait(300);
- }
+ for(const n of ["3","2","1"]){el("countdown").textContent=n;await wait(300);}
  el("countdown").textContent="";
  el("enemyPlayed").className="played-card reveal";
  el("enemyPlayed").textContent=names[enemyCard]||"?";
@@ -562,28 +647,17 @@ function showFinalResult(){
  if(!room||room.status!=="finished")return;
  el("final-result").classList.remove("hidden");
  el("final-score").textContent=room.my_name+" "+room.my_wins+"勝 － "+room.opponent_wins+"勝 "+room.opponent_name;
-
  const surrendered=room.finish_reason==="surrender";
  if(surrendered){
   const iWon=Number(room.winner)===player;
-  el("final-title").textContent=iWon
-   ?"相手が降参しました。あなたの勝利！"
-   :"降参しました。あなたの敗北";
-  el("final-score").textContent=iWon
-   ?"相手の降参により勝利しました。"
-   :"あなたの降参により敗北しました。";
+  el("final-title").textContent=iWon?"相手が降参しました。あなたの勝利！":"降参しました。あなたの敗北";
+  el("final-score").textContent=iWon?"相手の降参により勝利しました。":"あなたの降参により敗北しました。";
   el("rematchArea").classList.add("hidden");
  }else{
-  el("final-title").textContent=room.my_wins>room.opponent_wins
-   ?"あなたの勝利！"
-   :room.my_wins<room.opponent_wins
-   ?"相手の勝利！"
-   :"引き分け";
+  el("final-title").textContent=room.my_wins>room.opponent_wins?"あなたの勝利！":room.my_wins<room.opponent_wins?"相手の勝利！":"引き分け";
   el("rematchArea").classList.remove("hidden");
   el("rematchButton").disabled=rematchRequested;
-  if(rematchRequested){
-   el("rematchMessage").textContent="再戦希望を送信しました。相手の操作を待っています。";
-  }
+  if(rematchRequested)el("rematchMessage").textContent="再戦希望を送信しました。相手の操作を待っています。";
  }
  el("playArea").classList.add("hidden");
  el("discardArea").classList.add("hidden");
@@ -591,18 +665,13 @@ function showFinalResult(){
 
 async function requestRematch(){
  if(actionBusy||!room||room.status!=="finished"||rematchRequested)return;
- actionBusy=true;
- el("rematchButton").disabled=true;
+ actionBusy=true;el("rematchButton").disabled=true;
  try{
-  const{data,error}=await db.rpc("request_oreori_rematch",{
-   p_code:code,p_token:token
-  });
+  const{data,error}=await db.rpc("request_oreori_rematch",{p_code:code,p_token:token});
   if(error)throw error;
   if(data?.error)throw new Error(data.error);
   rematchRequested=true;
-  el("rematchMessage").textContent=data.started
-   ?"再戦を開始します。"
-   :"再戦希望を送信しました。相手の操作を待っています。";
+  el("rematchMessage").textContent=data.started?"再戦を開始します。":"再戦希望を送信しました。相手の操作を待っています。";
   if(data.started)await refreshRoom();
  }catch(e){
   el("rematchMessage").textContent=e.message||String(e);
@@ -617,29 +686,19 @@ async function refreshRoom(){
  if(refreshing||!code||!token)return;
  refreshing=true;
  try{
-  const{data,error}=await db.rpc("get_oreori_room",{
-   p_code:code,p_token:token
-  });
+  const{data,error}=await db.rpc("get_oreori_room",{p_code:code,p_token:token});
   if(error)throw error;
   if(data?.error)throw new Error(data.error);
-
   const wasFinished=room&&room.status==="finished";
   room=data;
-
   if(room.status==="finished"){
-   const{data:outcome,error:outcomeError}=await db.rpc("oreori_get_room_outcome",{
-    p_code:code,p_token:token
-   });
+   const{data:outcome,error:outcomeError}=await db.rpc("oreori_get_room_outcome",{p_code:code,p_token:token});
    if(!outcomeError&&!outcome?.error){
-    room.winner=outcome.winner;
-    room.finish_reason=outcome.finish_reason;
+    room.winner=outcome.winner;room.finish_reason=outcome.finish_reason;
    }
   }
-
   if(wasFinished&&room.status!=="finished"){
-   lastHistory=0;
-   selected=null;
-   rematchRequested=false;
+   lastHistory=0;selected=null;rematchRequested=false;
    el("final-result").classList.add("hidden");
    el("rematchArea").classList.remove("hidden");
    showBackCards();
@@ -653,9 +712,7 @@ async function refreshRoom(){
 }
 
 function renderRoom(){
- const r=room;
- if(!r)return;
-
+ const r=room;if(!r)return;
  el("myName").textContent=r.my_name||"自分";
  el("opponentName").textContent=r.opponent_name||"相手";
  el("myWins").textContent=r.my_wins??0;
@@ -664,90 +721,53 @@ function renderRoom(){
  el("enemyScore").textContent=r.opponent_wins??0;
  el("myLeft").textContent=countHand(r.my_hand);
  el("enemyLeft").textContent=r.opponent_left??0;
-
  if(selected&&Number(r.my_hand?.[selected]||0)<=0)selected=null;
  drawHand("myHand",r.my_hand);
-
- if(r.opponent_hand){
-  drawHand("enemyHand",r.opponent_hand);
- }else{
-  drawHand("enemyHand",{rock:Number(r.opponent_left||0),scissors:0,paper:0},true);
- }
-
+ if(r.opponent_hand)drawHand("enemyHand",r.opponent_hand);
+ else drawHand("enemyHand",{rock:Number(r.opponent_left||0),scissors:0,paper:0},true);
  el("myDiscard").textContent=r.my_discard?"捨て札："+names[r.my_discard]:"";
  el("opponentDiscard").textContent=r.opponent_discard?"相手の捨て札："+names[r.opponent_discard]:"";
-
  const total=(r.mode==="hidden"||r.mode==="open")?8:9;
- el("round").textContent=r.status==="finished"
-  ?"対戦終了"
-  :"第"+Math.min(Number(r.round||1),total)+"回戦 / 全"+total+"回戦";
-
+ el("round").textContent=r.status==="finished"?"対戦終了":"第"+Math.min(Number(r.round||1),total)+"回戦 / 全"+total+"回戦";
  const canDiscard=r.status==="waiting_discard"&&!r.my_discard&&!animatingHistory&&!actionBusy;
  const canPlay=r.status==="playing"&&!r.has_picked&&!animatingHistory&&!actionBusy;
-
  el("discardArea").classList.toggle("hidden",!canDiscard);
  el("playArea").classList.toggle("hidden",!canPlay);
  el("discardButton").disabled=!selected||actionBusy;
  el("playButton").disabled=!selected||actionBusy;
-
- const waitingWithoutOpponent=
-  player===1&&
-  (r.status==="waiting"||r.status==="waiting_discard")&&
-  !r.opponent_name;
-
+ const waitingWithoutOpponent=player===1&&(r.status==="waiting"||r.status==="waiting_discard")&&!r.opponent_name;
  el("leaveWaitingButton").classList.toggle("hidden",!waitingWithoutOpponent);
  el("surrenderButton").classList.toggle("hidden",r.status!=="playing");
  el("finishedHomeButton").classList.toggle("hidden",r.status!=="finished");
-
- if(r.status==="waiting"){
-  el("message").textContent="友達の参加を待っています";
- }else if(r.status==="waiting_discard"){
-  el("message").textContent=r.my_discard?"相手の捨て札選択を待っています":"捨てるカードを選んでください";
- }else if(r.status==="playing"&&r.has_picked){
-  el("message").textContent="相手の選択待ち";
- }else if(r.status==="playing"){
-  el("message").textContent="カードを選択してください";
- }else if(r.status==="finished"){
-  el("message").textContent="対戦終了！";
-  showFinalResult();
- }
-
- if(!animatingHistory&&Array.isArray(r.history)&&r.history.length>lastHistory){
-  displayHistory(r.history);
- }
+ if(r.status==="waiting")el("message").textContent="友達の参加を待っています";
+ else if(r.status==="waiting_discard")el("message").textContent=r.my_discard?"相手の捨て札選択を待っています":"捨てるカードを選んでください";
+ else if(r.status==="playing"&&r.has_picked)el("message").textContent="相手の選択待ち";
+ else if(r.status==="playing")el("message").textContent="カードを選択してください";
+ else if(r.status==="finished"){el("message").textContent="対戦終了！";showFinalResult();}
+ if(!animatingHistory&&Array.isArray(r.history)&&r.history.length>lastHistory)displayHistory(r.history);
 }
 
 async function leaveWaitingRoom(){
  if(actionBusy||!room)return;
  if(!confirm("待機ルームを終了してホームに戻りますか？"))return;
-
- actionBusy=true;
- el("leaveWaitingButton").disabled=true;
+ actionBusy=true;el("leaveWaitingButton").disabled=true;
  try{
-  const{data,error}=await db.rpc("oreori_leave_waiting_room",{
-   p_code:code,p_token:token
-  });
+  const{data,error}=await db.rpc("oreori_leave_waiting_room",{p_code:code,p_token:token});
   if(error)throw error;
   if(data?.error)throw new Error(data.error);
   resetToHome("待機ルームを終了しました。");
  }catch(e){
   el("message").textContent=e.message||String(e);
   el("leaveWaitingButton").disabled=false;
- }finally{
-  actionBusy=false;
- }
+ }finally{actionBusy=false;}
 }
 
 async function surrenderMatch(){
  if(actionBusy||!room||room.status!=="playing")return;
  if(!confirm("降参してホームに戻りますか？この操作は取り消せません。"))return;
-
- actionBusy=true;
- el("surrenderButton").disabled=true;
+ actionBusy=true;el("surrenderButton").disabled=true;
  try{
-  const{data,error}=await db.rpc("oreori_surrender",{
-   p_code:code,p_token:token
-  });
+  const{data,error}=await db.rpc("oreori_surrender",{p_code:code,p_token:token});
   if(error)throw error;
   if(data?.error)throw new Error(data.error);
   await refreshRoom();
@@ -755,8 +775,7 @@ async function surrenderMatch(){
   el("message").textContent=e.message||String(e);
   el("surrenderButton").disabled=false;
  }finally{
-  actionBusy=false;
-  if(room)renderRoom();
+  actionBusy=false;if(room)renderRoom();
  }
 }
 
@@ -767,44 +786,26 @@ function returnHomeAfterFinished(){
 
 async function discardCard(){
  if(actionBusy||!selected)return;
- actionBusy=true;
- const card=selected;
- el("discardButton").disabled=true;
+ actionBusy=true;el("discardButton").disabled=true;
  try{
-  const{data,error}=await db.rpc("discard_oreori_card",{
-   p_code:code,p_token:token,p_card:card
-  });
+  const{data,error}=await db.rpc("discard_oreori_card",{p_code:code,p_token:token,p_card:selected});
   if(error)throw error;
   if(data?.error)throw new Error(data.error);
-  selected=null;
-  await refreshRoom();
- }catch(e){
-  el("message").textContent=e.message||String(e);
- }finally{
-  actionBusy=false;
-  renderRoom();
- }
+  selected=null;await refreshRoom();
+ }catch(e){el("message").textContent=e.message||String(e);}
+ finally{actionBusy=false;renderRoom();}
 }
 
 async function playCard(){
  if(actionBusy||!selected)return;
- actionBusy=true;
- const card=selected;
- el("playButton").disabled=true;
+ actionBusy=true;el("playButton").disabled=true;
  try{
-  const{data,error}=await db.rpc("play_oreori_card",{
-   p_code:code,p_token:token,p_card:card
-  });
+  const{data,error}=await db.rpc("play_oreori_card",{p_code:code,p_token:token,p_card:selected});
   if(error)throw error;
   if(data?.error)throw new Error(data.error);
-  selected=null;
-  await refreshRoom();
- }catch(e){
-  el("message").textContent=e.message||String(e);
- }finally{
-  actionBusy=false;
-  renderRoom();
- }
+  selected=null;await refreshRoom();
+ }catch(e){el("message").textContent=e.message||String(e);}
+ finally{actionBusy=false;renderRoom();}
 }
 
 async function restoreSession(){
@@ -812,20 +813,13 @@ async function restoreSession(){
  const savedToken=localStorage.getItem("oreori_token");
  const savedPlayer=Number(localStorage.getItem("oreori_player"));
  if(!savedCode||!savedToken||![1,2].includes(savedPlayer))return;
-
- code=savedCode;
- token=savedToken;
- player=savedPlayer;
- showGame();
- await refreshRoom();
-
- if(room){
-  startPolling();
- }else{
-  resetToHome("保存されていた対戦ルームが見つかりませんでした。");
- }
+ code=savedCode;token=savedToken;player=savedPlayer;
+ showGame();await refreshRoom();
+ if(room)startPolling();
+ else resetToHome("保存されていた対戦ルームが見つかりませんでした。");
 }
 
+loadWallet();
 restoreSession();
 </script>
 </body>
