@@ -60,6 +60,24 @@ input,select{max-width:100%}
 .rarity-A{border:2px solid #ff6262}
 .rarity-S{border:2px solid #ffd84d}
 .rarity-X{border:2px solid #d58cff}
+
+/* 装備スキンの対戦表示 */
+.hand-card.skin-B,.played-card.skin-B{border-color:#aeb8c5;background:linear-gradient(145deg,#526174,#263344)}
+.hand-card.skin-A,.played-card.skin-A{border-color:#ff6262;background:linear-gradient(145deg,#8b343b,#3b202b);box-shadow:0 0 10px #ff626255}
+.hand-card.skin-S,.played-card.skin-S{border-color:#ffd84d;background:radial-gradient(circle at 50% 25%,#b58b2d,#473317 75%);box-shadow:0 0 15px #ffd84d77}
+.hand-card.skin-X,.played-card.skin-X{border-color:#d58cff;background:linear-gradient(145deg,#713f91,#291c49);box-shadow:0 0 17px #d58cff88}
+.hand-card.skin-S,.hand-card.skin-X{position:relative}
+.hand-card.skin-S:after{content:"S";position:absolute;right:2px;top:0;font-size:9px;color:#ffe98a}
+.hand-card.skin-X:after{content:"X";position:absolute;right:2px;top:0;font-size:9px;color:#efcaff}
+
+/* 背景スキン */
+#game.battle-bg-B{background:linear-gradient(145deg,#202e43,#34465d)}
+#game.battle-bg-A{background:linear-gradient(145deg,#321f2b,#202e43 70%)}
+#game.battle-bg-S{background:radial-gradient(ellipse at top,#55431f,#202e43 72%)}
+#game.battle-bg-X{background:radial-gradient(ellipse at top,#49285f,#101827 72%)}
+#game.battle-bg-default{background:#202e43}
+#game{transition:background .35s}
+
 @media(max-width:380px){
 body{padding:6px}
 section{padding:9px}
@@ -221,7 +239,7 @@ section{padding:9px}
 <p class="small" id="connection"></p>
 </section>
 </main>
-<div id="version">ver 0.8.1</div>
+<div id="version">ver 0.8.2</div>
 
 <script>
 const SUPABASE_URL="https://zsoebwqiglefbiddjynz.supabase.co";
@@ -234,6 +252,7 @@ const categoryNames={icon:"アイコン",rock:"グー",scissors:"チョキ",pape
 const rarityColors={B:"#aeb8c5",A:"#ff6262",S:"#ffd84d",X:"#d58cff"};
 
 let currentProfile=null,currentGacha=null,currentInventory=[];
+let roomSkins={my:null,opponent:null};
 let code="",token="",player=0,mode="normal",selected=null,room=null;
 let lastHistory=0,polling=null,animatingHistory=false;
 let refreshing=false,actionBusy=false,rematchRequested=false;
@@ -447,7 +466,7 @@ function showGame(){
 }
 function resetToHome(message=""){
  stopPolling();clearSession();
- code="";token="";player=0;room=null;selected=null;
+ code="";token="";player=0;room=null;selected=null;roomSkins={my:null,opponent:null};
  lastHistory=0;rematchRequested=false;animatingHistory=false;
  rewardClaimedForMatch=false;
  el("game").classList.add("hidden");
@@ -474,6 +493,7 @@ async function createRoom(){
   if(error)throw error;
   if(data?.error)throw new Error(data.error);
   player=1;saveSession();showGame();
+  await registerRoomPlayer();
   await refreshRoom();startPolling();
  }catch(e){el("homeMessage").textContent=e.message||String(e);}
  finally{actionBusy=false;el("createButton").disabled=false;}
@@ -495,7 +515,7 @@ async function joinRoom(){
   if(data?.error)throw new Error(data.error);
   player=Number(data.player);
   if(player!==1&&player!==2)throw new Error("参加者情報を取得できませんでした");
-  saveSession();showGame();await refreshRoom();startPolling();
+  saveSession();showGame();await registerRoomPlayer();await refreshRoom();startPolling();
  }catch(e){el("homeMessage").textContent=e.message||String(e);}
  finally{actionBusy=false;el("joinButton").disabled=false;}
 }
@@ -514,6 +534,40 @@ function cardArray(h){
  for(let i=0;i<Number(h?.paper||0);i++)a.push("paper");
  return a;
 }
+function rarityFromSkin(skin){
+ const m=String(skin||"").match(/(?:^|_)([basx])(?:_|$)/i);
+ return m?m[1].toUpperCase():"default";
+}
+function applyCardSkin(node,side,cardType){
+ const q=roomSkins[side]||{};
+ const skin=q[cardType+"_skin"]||cardType+"_default";
+ node.dataset.skin=skin;
+ node.classList.remove("skin-default","skin-B","skin-A","skin-S","skin-X");
+ node.classList.add("skin-"+rarityFromSkin(skin));
+}
+function applyBattleBackground(){
+ const q=roomSkins.my||{};
+ const skin=q.background_skin||"background_default";
+ const game=el("game");
+ game.classList.remove("battle-bg-default","battle-bg-B","battle-bg-A","battle-bg-S","battle-bg-X");
+ game.classList.add("battle-bg-"+rarityFromSkin(skin));
+}
+async function registerRoomPlayer(){
+ try{
+  const {error}=await db.rpc("oreori_register_room_player",{p_code:code,p_token:token});
+  if(error)throw error;
+  await loadRoomSkins();
+ }catch(e){
+  el("connection").textContent="スキン連携SQLが未実行です。対戦自体は続行できます。";
+ }
+}
+async function loadRoomSkins(){
+ const {data,error}=await db.rpc("oreori_get_room_skins",{p_code:code,p_token:token});
+ if(error)throw error;
+ roomSkins={my:data?.my_equipped||{},opponent:data?.opponent_equipped||null};
+ applyBattleBackground();
+ if(room)renderRoom();
+}
 function drawHand(id,h,faceDown=false){
  const area=el(id);area.innerHTML="";
  if(faceDown){
@@ -526,6 +580,7 @@ function drawHand(id,h,faceDown=false){
  cardArray(h).forEach(card=>{
   const b=document.createElement("button");
   b.className="hand-card"+(selected===card&&id==="myHand"?" selected":"");
+  applyCardSkin(b,id==="myHand"?"my":"opponent",card);
   b.textContent=names[card];
   if(id==="myHand"){
    const canSelect=!actionBusy&&!animatingHistory&&room&&(
@@ -540,7 +595,7 @@ function drawHand(id,h,faceDown=false){
 }
 function showBackCards(){
  ["enemyPlayed","myPlayed"].forEach(id=>{
-  el(id).className="played-card back";el(id).textContent="◆";
+  el(id).className="played-card back";delete el(id).dataset.skin;el(id).textContent="◆";
  });
  el("countdown").textContent="";
  el("result-label").textContent="";
@@ -564,8 +619,10 @@ async function displayOneRound(item){
  for(const n of ["3","2","1"]){el("countdown").textContent=n;await wait(300);}
  el("countdown").textContent="";
  el("enemyPlayed").className="played-card reveal";
+ applyCardSkin(el("enemyPlayed"),"opponent",enemyCard);
  el("enemyPlayed").textContent=names[enemyCard]||"?";
  el("myPlayed").className="played-card reveal";
+ applyCardSkin(el("myPlayed"),"my",myCard);
  el("myPlayed").textContent=names[myCard]||"?";
  await wait(650);
  const result=item.result;
@@ -629,6 +686,7 @@ async function refreshRoom(){
   if(data?.error)throw new Error(data.error);
   const wasFinished=room&&room.status==="finished";
   room=data;
+  if(room.opponent_name&&!roomSkins.opponent){try{await loadRoomSkins();}catch(e){}}
   if(room.status==="finished"){
    const{data:outcome,error:outcomeError}=await db.rpc("oreori_get_room_outcome",{p_code:code,p_token:token});
    if(!outcomeError&&!outcome?.error){
@@ -764,7 +822,7 @@ async function restoreSession(){
  const savedPlayer=Number(localStorage.getItem("oreori_player"));
  if(!savedCode||!savedToken||![1,2].includes(savedPlayer))return;
  code=savedCode;token=savedToken;player=savedPlayer;
- showGame();await refreshRoom();
+ showGame();await registerRoomPlayer();await refreshRoom();
  if(room)startPolling();
  else resetToHome("保存されていた対戦ルームが見つかりませんでした。");
 }
